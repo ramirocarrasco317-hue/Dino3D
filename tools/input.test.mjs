@@ -1,28 +1,19 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
-import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { chromium } from 'playwright';
+import { serveBuild } from './serve-build.mjs';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
 
 // Run after npm run build. DINO_BROWSER_PATH optionally selects an installed browser.
-const root = fileURLToPath(new URL('../dist/', import.meta.url));
 let server, browser, page, touch;
 const errors = [];
 
 before(async () => {
-  server = createServer(async (req, res) => {
-    try {
-      const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-      const file = path.resolve(root, `.${pathname === '/' ? '/index.html' : pathname}`);
-      if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
-      const data = await readFile(file);
-      res.setHeader('content-type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' }[path.extname(file)] || 'application/octet-stream');
-      res.end(data);
-    } catch { res.writeHead(404).end(); }
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  server = await serveBuild();
   browser = await chromium.launch({
     executablePath: process.env.DINO_BROWSER_PATH || undefined,
     args: ['--enable-unsafe-swiftshader', '--use-gl=angle', '--use-angle=swiftshader'],
@@ -30,7 +21,7 @@ before(async () => {
   page = await browser.newPage({ viewport: { width: 1280, height: 900 }, hasTouch: true, reducedMotion: 'reduce' });
   page.on('pageerror', (err) => errors.push(err.message));
   await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: '' }));
-  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.goto(server.url);
   await page.waitForFunction(() => {
     const loading = document.getElementById('loading');
     return !!window.__dino && (!loading || loading.classList.contains('hide'));
@@ -62,7 +53,7 @@ beforeEach(async () => {
 
 after(async () => {
   await browser?.close();
-  if (server) await new Promise((resolve) => server.close(resolve));
+  await server?.close();
   assert.deepEqual(errors, []);
 });
 
@@ -317,6 +308,83 @@ async function startupPage(t, init) {
   if (init) await fresh.addInitScript(init);
   return fresh;
 }
+
+test('graphics resources stay bounded across 18 km and forty restarts', async () => {
+  const samples = await page.evaluate(() => {
+    const d = window.__dino;
+    const renderer = d.engine.renderer;
+    const shadows = renderer.shadowMap.enabled;
+    const samples = [];
+    const sample = (label) => {
+      const retained = new Set();
+      const add = (object) => object.traverse((node) => { if (node.geometry) retained.add(node.geometry.uuid); });
+      add(d.engine.scene);
+      for (const pools of [d.game.chunks.pools, d.game.chunks.propPool, d.game.chunks.powerPool]) {
+        for (const pool of pools.values()) for (const object of pool) add(object);
+      }
+      for (const coin of d.game.chunks.coinPool) add(coin);
+      samples.push({ label, geometries: renderer.info.memory.geometries, retained: retained.size });
+    };
+    try {
+      d.game.start();
+      d.game.chunks.reset(0xd103d);
+      renderer.shadowMap.enabled = false;
+      renderer.setPixelRatio(1);
+      renderer.setSize(160, 100, false);
+      for (let i = 1; i <= 600; i++) {
+        d.game.chunks.update(1, 30, false);
+        renderer.render(d.engine.scene, d.engine.camera);
+        if (i % 60 === 0) sample(`${i * 30} m`);
+      }
+      for (let i = 1; i <= 40; i++) {
+        d.game.start();
+        renderer.render(d.engine.scene, d.engine.camera);
+        if (i % 10 === 0) sample(`restart ${i}`);
+      }
+      return samples;
+    } finally {
+      renderer.shadowMap.enabled = shadows;
+      d.engine._onResize();
+    }
+  });
+  for (const sample of samples) assert.ok(sample.geometries <= sample.retained + 8, JSON.stringify(sample));
+});
+
+test('QA exits unsuccessfully for console errors, broken scenarios and empty filters', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'dino-qa-regression-'));
+  const relative = path.relative(tmpdir(), directory);
+  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cli = (args) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./qa.mjs', import.meta.url)), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    const timer = setTimeout(() => child.kill(), 60000);
+    child.once('error', reject);
+    child.once('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
+    t.after(() => child.kill());
+  });
+  for (const mode of ['console', 'scenario']) {
+    const injected = mode === 'console'
+      ? "console.error('Injected QA failure [warning]');"
+      : "let app; Object.defineProperty(window, '__dino', { get: () => app, set(value) { app = value; value.game.enterMenu = () => { throw new Error('Injected scenario failure'); }; } });";
+    const proxy = await serveBuild({ transformHtml: (html) => html.replace('<head>', `<head><script>${injected}</script>`) });
+    try {
+      const out = path.join(directory, mode);
+      const result = await cli(['--url', proxy.url, '--only', '01-menu', '--out', out, '--width', '320', '--height', '240']);
+      assert.equal(result.code, 1, result.output);
+      const report = JSON.parse(await readFile(path.join(out, '_report.json'), 'utf8'));
+      assert.equal(report.passed, false);
+      assert.ok(report.logs.some((line) => line.includes(mode === 'console' ? 'Injected QA failure' : 'Injected scenario failure')), result.output);
+    } finally {
+      await proxy.close();
+    }
+  }
+  const result = await cli(['--only', 'does-not-exist', '--out', path.join(directory, 'empty')]);
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /No scenarios match/);
+});
 
 async function expectStartupError(fresh, text) {
   const alert = fresh.getByRole('alert');
