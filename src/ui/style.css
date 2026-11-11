@@ -353,7 +353,7 @@ html, body {
 }
 .stat .value { font-size: 26px; font-weight: 900; line-height: 1.15; overflow-wrap: anywhere; }
 .stat.gold .value { color: var(--gold-deep); }
-.stat.big .value { font-size: 30px; }
+.stat.big .value { font-size: 26px; }
 
 .btn-row { display: flex; gap: 12px; flex-wrap: wrap; }
 
