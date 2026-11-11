@@ -44,6 +44,9 @@ export class UI {
       </div>
       <div class="hud-corner hud-tr">
         <div class="hud-coins"><span class="dot"></span><span class="num" data-coins>0</span></div>
+        <button class="hud-pause" data-pause type="button" aria-label="Pausar partida" title="Pausar partida">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="4" /></svg>
+        </button>
       </div>
       <div id="powers"></div>
       <div id="speedfx"></div>
@@ -95,6 +98,7 @@ export class UI {
           <div class="ctrl"><kbd>S</kbd> Agacharse</div>
           <div class="ctrl"><kbd>ESC</kbd> Pausa</div>
         </div>
+        <p class="touch-controls">Deslizá a los lados para cambiar de carril, hacia arriba para saltar y hacia abajo para agacharte. También podés tocar para saltar.</p>
         <div class="settings">
           <label class="toggle clickable"><input type="checkbox" data-sfx checked><span class="track"></span>Efectos de sonido</label>
           <input type="range" class="clickable" data-vol min="0" max="1" step="0.05" value="0.8" aria-label="Volumen">
@@ -108,7 +112,7 @@ export class UI {
     this.achScreen.innerHTML = `
       <div class="scrim"></div>
       <div class="panel wide">
-        <h1 class="title" style="font-size:32px">🏅 Logros</h1>
+        <h1 class="title achievements-title">🏅 Logros</h1>
         <p class="subtitle">Objetivos simples para darle rumbo a cada carrera.</p>
         <div class="ach-list" data-list></div>
         <div class="btn-row"><button class="primary" data-back>Volver</button></div>
@@ -121,7 +125,7 @@ export class UI {
     this.pauseScreen.innerHTML = `
       <div class="scrim"></div>
       <div class="panel">
-        <h1 class="title" style="font-size:38px">⏸ Pausa</h1>
+        <h1 class="title secondary-title">⏸ Pausa</h1>
         <p class="subtitle">Tomate el tiempo que quieras.</p>
         <div class="stat-row">
           <div class="stat"><div class="label">Puntos</div><div class="value num" data-score>0</div></div>
@@ -143,7 +147,7 @@ export class UI {
       <div class="scrim"></div>
       <div class="panel">
         <div data-badge style="margin-bottom:10px"></div>
-        <h1 class="title" style="font-size:38px">Fin de la carrera</h1>
+        <h1 class="title secondary-title">Fin de la carrera</h1>
         <p class="subtitle" data-flavour>Ese cactus no se movió ni un centímetro.</p>
         <div class="stat-row">
           <div class="stat big"><div class="label">Puntos</div><div class="value num" data-score>0</div></div>
@@ -164,6 +168,23 @@ export class UI {
     `;
     this.root.appendChild(this.overScreen);
 
+    // Only the contents scroll; primary actions remain reachable at any height.
+    for (const [screen, label] of [
+      [this.menu, 'Opciones del juego'], [this.achScreen, 'Lista de logros'],
+      [this.pauseScreen, 'Datos de la partida'], [this.overScreen, 'Resultados de la carrera'],
+    ]) {
+      const panel = screen.querySelector('.panel');
+      const actions = panel.querySelector('.btn-row');
+      actions.classList.add('panel-actions');
+      const content = el('div', 'panel-content');
+      content.tabIndex = 0;
+      content.setAttribute('data-scrollable', '');
+      content.setAttribute('role', 'region');
+      content.setAttribute('aria-label', label);
+      for (const child of [...panel.children]) if (child !== actions) content.appendChild(child);
+      panel.replaceChildren(content, actions);
+    }
+
     this.fps = el('div');
     this.fps.id = 'fps';
     this.root.appendChild(this.fps);
@@ -179,6 +200,7 @@ export class UI {
     };
 
     click(this.menu, '[data-play]', () => this.game.start());
+    click(this.hud, '[data-pause]', () => this.game.pause());
     click(this.menu, '[data-ach]', () => this._openAchievements());
     click(this.achScreen, '[data-back]', () => this._closeAchievements());
     click(this.pauseScreen, '[data-resume]', () => this.game.resume());
@@ -237,9 +259,14 @@ export class UI {
     show(this.pauseScreen, state === STATE.PAUSED);
     show(this.overScreen, false);
     this.hud.classList.toggle('visible', state === STATE.PLAYING || state === STATE.PAUSED || state === STATE.DEAD);
+    this.hud.classList.toggle('playing', state === STATE.PLAYING && !this.showAchievements);
     if (state === STATE.MENU) this._refreshMenu();
     if (state === STATE.PAUSED) this._refreshPause();
     if (state === STATE.PLAYING) this.toasts.innerHTML = '';
+    this.game.input.setTouchEnabled(state === STATE.PLAYING && !this.showAchievements);
+    // A hidden button must not keep capturing keys after its screen closes.
+    const active = document.activeElement;
+    if (active && this.root.contains(active) && !active.getClientRects().length) active.blur();
   }
 
   _refreshMenu() {

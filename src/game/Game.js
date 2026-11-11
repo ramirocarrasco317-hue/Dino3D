@@ -43,6 +43,7 @@ export class Game {
     this.time = 0;
     this.deadTime = 0;
     this._pendingGameOver = false;
+    this._gameOverResult = null;
 
     this.run = this._blankRun();
     this.aiTick = null;
@@ -65,6 +66,8 @@ export class Game {
   // -- state machine ---------------------------------------------------------
   enterMenu(initial = false) {
     this.state = STATE.MENU;
+    this._pendingGameOver = false;
+    this._gameOverResult = null;
     this.speed = CFG.run.startSpeed * 0.62;
     this.player.reset();
     this.effects.clear();
@@ -81,6 +84,7 @@ export class Game {
     this.speed = CFG.run.startSpeed;
     this.deadTime = 0;
     this._pendingGameOver = false;
+    this._gameOverResult = null;
     this.chunks.reset((Math.random() * 0xffffffff) >>> 0);
     this.player.reset();
     this.effects.clear();
@@ -116,29 +120,42 @@ export class Game {
     this.state = STATE.DEAD;
     this.deadTime = 0;
     this._pendingGameOver = true;
+    // Persist before another input can restart or leave the death animation.
+    const result = this._gameOverResult = this._saveRun();
     this.player.kill();
     this.rig.addShake(1.1);
     this.effects.burstImpact(this.player.x, this.player.y + 0.8, 0, 0xffd9a0);
     bus.emit('sfx', 'hit');
-    setTimeout(() => bus.emit('sfx', 'death'), 90);
+    setTimeout(() => {
+      if (this.state === STATE.DEAD && this._gameOverResult === result) bus.emit('sfx', 'death');
+    }, 90);
     bus.emit('state', { state: this.state, cause });
   }
 
-  _finishRun() {
-    this._pendingGameOver = false;
+  _saveRun() {
     this.run.score = Math.floor(this.run.score);
     this.run.distance = Math.floor(this.run.distance);
     const { newBest } = profile.commitRun(this.run);
     const unlocked = evaluateAchievements(this.run);
-    if (newBest) setTimeout(() => bus.emit('sfx', 'newRecord'), 260);
-    else bus.emit('sfx', 'gameover');
-    bus.emit('gameover', {
+    return {
       run: this.run,
       newBest,
       unlocked,
       best: profile.data.bestScore,
       coins: profile.data.coins,
-    });
+    };
+  }
+
+  _finishRun() {
+    if (!this._pendingGameOver || !this._gameOverResult) return;
+    this._pendingGameOver = false;
+    const result = this._gameOverResult;
+    if (result.newBest) {
+      setTimeout(() => {
+        if (this.state === STATE.DEAD && this._gameOverResult === result) bus.emit('sfx', 'newRecord');
+      }, 260);
+    } else bus.emit('sfx', 'gameover');
+    bus.emit('gameover', result);
   }
 
   restart() { this.start(); }
@@ -220,17 +237,19 @@ export class Game {
 
       this.power.update(dt);
       this._checkCollisions(prevPlayer, this.speed * dt);
-      this._checkPickups(dt);
+      if (this.state === STATE.PLAYING) {
+        this._checkPickups(dt);
 
-      if (this.run.distance >= this._nextMilestone) {
-        this._nextMilestone += MILESTONE;
-        bus.emit('sfx', 'milestone');
-        bus.emit('toast', { text: `${Math.floor(this.run.distance / MILESTONE) * MILESTONE} m`, kind: 'milestone' });
-      }
+        if (this.run.distance >= this._nextMilestone) {
+          this._nextMilestone += MILESTONE;
+          bus.emit('sfx', 'milestone');
+          bus.emit('toast', { text: `${Math.floor(this.run.distance / MILESTONE) * MILESTONE} m`, kind: 'milestone' });
+        }
 
-      // Speed trail once the run gets genuinely fast.
-      if (this.speed01 > 0.35) {
-        this.effects.trail(this.player.x, this.player.y + 0.7, 0, this.speed01, this.env.skyTint.getHex());
+        // Speed trail once the run gets genuinely fast.
+        if (this.speed01 > 0.35) {
+          this.effects.trail(this.player.x, this.player.y + 0.7, 0, this.speed01, this.env.skyTint.getHex());
+        }
       }
     }
 
@@ -290,6 +309,7 @@ export class Game {
     const pzHalf = CFG.player.depth / 2 - 0.04;
 
     this.chunks.forEachObstacleNear(-4, 4, (o, wz) => {
+      if (this.state !== STATE.PLAYING) return;
       const col = o.userData.col;
       if (!col) return;
       if (!o.userData.counted && wz > 1.2) {

@@ -257,6 +257,8 @@ export class ChunkManager {
       if (!this.propPool.has(k)) this.propPool.set(k, []);
       const pool = this.propPool.get(k);
       if (pool.length < 20) pool.push(o);
+      // Baked scenery owns its geometry; its materials are shared by live props.
+      else o.traverse((node) => node.geometry?.dispose());
     }
     c.obstacles.length = 0;
     c.coins.length = 0;
