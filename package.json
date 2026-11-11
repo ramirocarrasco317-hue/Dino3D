@@ -8,7 +8,7 @@
     "preview": "vite preview --port 4173",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "node --test --test-timeout=30000 tools/game-save.test.mjs tools/chunk-memory.test.mjs",
-    "test:browser": "node --test --test-timeout=120000 tools/input.test.mjs",
+    "test:browser": "node --test --test-timeout=120000 tools/input.test.mjs && node --test --test-timeout=120000 tools/qa.test.mjs",
     "qa": "node tools/qa.mjs",
     "qa:production": "node tools/qa.mjs --production --width 960 --height 540",
     "verify": "npm run build && npm test && npm run qa:production"

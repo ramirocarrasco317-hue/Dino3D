@@ -601,7 +601,7 @@ input[type=range]::-moz-range-thumb {
   .hud-tr { top: calc(14px + var(--safe-top)); right: calc(16px + var(--safe-right)); }
   .panel { padding: 20px 18px 18px; border-radius: 22px; }
   .title { font-size: clamp(26px, 7.5vw, 38px); gap: 8px; }
-  .stat-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr)); gap: 8px; }
   .stat { padding: 10px 8px; }
   .stat .label { font-size: clamp(9px, 2.5vw, 10px); letter-spacing: 0.02em; }
   .stat .value { font-size: clamp(17px, 5vw, 22px); }

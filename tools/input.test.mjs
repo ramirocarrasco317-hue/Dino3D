@@ -2,11 +2,6 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, test } from 'node:test';
 import { chromium } from 'playwright';
 import { serveBuild } from './serve-build.mjs';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Run after npm run build. DINO_BROWSER_PATH optionally selects an installed browser.
 let server, browser, page, touch;
@@ -188,7 +183,9 @@ async function assertPanelFits() {
   }
 }
 
-test('menus and ten unlocked achievements keep their action buttons on small screens', async () => {
+test('menus and ten unlocked achievements keep their action buttons on small screens', async (t) => {
+  const fallback = await page.addStyleTag({ content: '.stat .value { font-family: monospace; }' });
+  t.after(() => fallback.evaluate((el) => el.remove()));
   for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 568, height: 320 }]) {
     await page.setViewportSize(viewport);
     await page.evaluate(() => window.__dino.game.enterMenu());
@@ -211,7 +208,7 @@ test('menus and ten unlocked achievements keep their action buttons on small scr
     await page.evaluate(() => {
       const d = window.__dino;
       d.game.resume();
-      Object.assign(d.game.run, { score: 20000, distance: 2400 });
+      Object.assign(d.game.run, { score: 200000, distance: 2400 });
       d.game.die(); d.sim(0.9);
       d.ui._showGameOver({ ...d.game._gameOverResult, unlocked: window.__layoutAchievements });
     });
@@ -303,88 +300,12 @@ test('panels and pause controls respect display cutouts and the home indicator',
 async function startupPage(t, init) {
   const fresh = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   t.after(() => fresh.close());
+  await fresh.bringToFront();
   fresh.on('pageerror', (error) => errors.push(error.message));
   await fresh.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: '' }));
   if (init) await fresh.addInitScript(init);
   return fresh;
 }
-
-test('graphics resources stay bounded across 18 km and forty restarts', async () => {
-  const samples = await page.evaluate(() => {
-    const d = window.__dino;
-    const renderer = d.engine.renderer;
-    const shadows = renderer.shadowMap.enabled;
-    const samples = [];
-    const sample = (label) => {
-      const retained = new Set();
-      const add = (object) => object.traverse((node) => { if (node.geometry) retained.add(node.geometry.uuid); });
-      add(d.engine.scene);
-      for (const pools of [d.game.chunks.pools, d.game.chunks.propPool, d.game.chunks.powerPool]) {
-        for (const pool of pools.values()) for (const object of pool) add(object);
-      }
-      for (const coin of d.game.chunks.coinPool) add(coin);
-      samples.push({ label, geometries: renderer.info.memory.geometries, retained: retained.size });
-    };
-    try {
-      d.game.start();
-      d.game.chunks.reset(0xd103d);
-      renderer.shadowMap.enabled = false;
-      renderer.setPixelRatio(1);
-      renderer.setSize(160, 100, false);
-      for (let i = 1; i <= 600; i++) {
-        d.game.chunks.update(1, 30, false);
-        renderer.render(d.engine.scene, d.engine.camera);
-        if (i % 60 === 0) sample(`${i * 30} m`);
-      }
-      for (let i = 1; i <= 40; i++) {
-        d.game.start();
-        renderer.render(d.engine.scene, d.engine.camera);
-        if (i % 10 === 0) sample(`restart ${i}`);
-      }
-      return samples;
-    } finally {
-      renderer.shadowMap.enabled = shadows;
-      d.engine._onResize();
-    }
-  });
-  for (const sample of samples) assert.ok(sample.geometries <= sample.retained + 8, JSON.stringify(sample));
-});
-
-test('QA exits unsuccessfully for console errors, broken scenarios and empty filters', async (t) => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'dino-qa-regression-'));
-  const relative = path.relative(tmpdir(), directory);
-  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const cli = (args) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./qa.mjs', import.meta.url)), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
-    child.stdout.on('data', (chunk) => { output += chunk; });
-    child.stderr.on('data', (chunk) => { output += chunk; });
-    const timer = setTimeout(() => child.kill(), 60000);
-    child.once('error', reject);
-    child.once('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
-    t.after(() => child.kill());
-  });
-  for (const mode of ['console', 'scenario']) {
-    const injected = mode === 'console'
-      ? "console.error('Injected QA failure [warning]');"
-      : "let app; Object.defineProperty(window, '__dino', { get: () => app, set(value) { app = value; value.game.enterMenu = () => { throw new Error('Injected scenario failure'); }; } });";
-    const proxy = await serveBuild({ transformHtml: (html) => html.replace('<head>', `<head><script>${injected}</script>`) });
-    try {
-      const out = path.join(directory, mode);
-      const result = await cli(['--url', proxy.url, '--only', '01-menu', '--out', out, '--width', '320', '--height', '240']);
-      assert.equal(result.code, 1, result.output);
-      const report = JSON.parse(await readFile(path.join(out, '_report.json'), 'utf8'));
-      assert.equal(report.passed, false);
-      assert.ok(report.logs.some((line) => line.includes(mode === 'console' ? 'Injected QA failure' : 'Injected scenario failure')), result.output);
-    } finally {
-      await proxy.close();
-    }
-  }
-  const result = await cli(['--only', 'does-not-exist', '--out', path.join(directory, 'empty')]);
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /No scenarios match/);
-});
 
 async function expectStartupError(fresh, text) {
   const alert = fresh.getByRole('alert');
@@ -420,7 +341,7 @@ test('missing WebGL shows an explanation and retry preserves the saved profile',
     await fresh.setViewportSize(viewport);
     await retry.scrollIntoViewIfNeeded();
     const r = await retry.boundingBox();
-    assert.ok(r && r.y >= 0 && r.y + r.height <= viewport.height);
+    assert.ok(r && r.y >= 0 && r.y + r.height <= viewport.height, JSON.stringify({ viewport, r }));
   }
   await expectRecovered(fresh, retry);
   const saved = await fresh.evaluate(() => JSON.parse(localStorage.getItem('dino3d.profile.v1')));
@@ -498,4 +419,46 @@ test('an interrupted download eventually replaces the loading message', async (t
   await fresh.goto(page.url());
   await expectStartupError(fresh, /tardando demasiado/);
   assert.equal(await fresh.evaluate(() => !!window.__dino), false);
+});
+
+// Keep GPU stress last; close this browser before running the QA CLI tests.
+test('graphics resources stay bounded across 18 km and forty restarts', async () => {
+  const samples = await page.evaluate(() => {
+    const d = window.__dino;
+    const renderer = d.engine.renderer;
+    const shadows = renderer.shadowMap.enabled;
+    const samples = [];
+    const sample = (label) => {
+      const retained = new Set();
+      const add = (object) => object.traverse((node) => { if (node.geometry) retained.add(node.geometry.uuid); });
+      add(d.engine.scene);
+      for (const pools of [d.game.chunks.pools, d.game.chunks.propPool, d.game.chunks.powerPool]) {
+        for (const pool of pools.values()) for (const object of pool) add(object);
+      }
+      for (const coin of d.game.chunks.coinPool) add(coin);
+      samples.push({ label, geometries: renderer.info.memory.geometries, retained: retained.size });
+    };
+    try {
+      d.game.start();
+      d.game.chunks.reset(0xd103d);
+      renderer.shadowMap.enabled = false;
+      renderer.setPixelRatio(1);
+      renderer.setSize(160, 100, false);
+      for (let i = 1; i <= 600; i++) {
+        d.game.chunks.update(1, 30, false);
+        renderer.render(d.engine.scene, d.engine.camera);
+        if (i % 60 === 0) sample(`${i * 30} m`);
+      }
+      for (let i = 1; i <= 40; i++) {
+        d.game.start();
+        renderer.render(d.engine.scene, d.engine.camera);
+        if (i % 10 === 0) sample(`restart ${i}`);
+      }
+      return samples;
+    } finally {
+      renderer.shadowMap.enabled = shadows;
+      d.engine._onResize();
+    }
+  });
+  for (const sample of samples) assert.ok(sample.geometries <= sample.retained + 8, JSON.stringify(sample));
 });
