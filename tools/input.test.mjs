@@ -31,7 +31,10 @@ before(async () => {
   page.on('pageerror', (err) => errors.push(err.message));
   await page.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: '' }));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  await page.waitForFunction(() => !!window.__dino);
+  await page.waitForFunction(() => {
+    const loading = document.getElementById('loading');
+    return !!window.__dino && (!loading || loading.classList.contains('hide'));
+  });
   await page.evaluate(() => {
     const d = window.__dino;
     d.engine.stop();
@@ -304,4 +307,127 @@ test('panels and pause controls respect display cutouts and the home indicator',
   await page.locator('[data-play]').tap();
   const r = await page.getByRole('button', { name: 'Pausar partida' }).boundingBox();
   assert.ok(r && r.x >= 44 && r.x + r.width <= 800 && r.y + r.height <= 369);
+});
+
+async function startupPage(t, init) {
+  const fresh = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+  t.after(() => fresh.close());
+  fresh.on('pageerror', (error) => errors.push(error.message));
+  await fresh.route('https://fonts.googleapis.com/**', (route) => route.fulfill({ contentType: 'text/css', body: '' }));
+  if (init) await fresh.addInitScript(init);
+  return fresh;
+}
+
+async function expectStartupError(fresh, text) {
+  const alert = fresh.getByRole('alert');
+  await alert.waitFor({ state: 'visible' });
+  assert.match(await alert.textContent(), text);
+  assert.equal(await fresh.locator('#loading').count(), 0);
+  const retry = fresh.getByRole('link', { name: 'Reintentar' });
+  assert.equal(await retry.isVisible(), true);
+  return retry;
+}
+
+async function expectRecovered(fresh, retry) {
+  await Promise.all([fresh.waitForEvent('load'), retry.click()]);
+  await fresh.waitForFunction(() => !!window.__dino && !document.getElementById('loading'));
+  assert.equal(await fresh.getByRole('alert').isVisible(), false);
+  assert.equal(await fresh.evaluate(() => window.__dino.game.state), 'menu');
+  await fresh.evaluate(() => window.__dino.engine.stop());
+}
+
+test('missing WebGL shows an explanation and retry preserves the saved profile', async (t) => {
+  const fresh = await startupPage(t, () => {
+    if (sessionStorage.getItem('graphics-failed-once')) return;
+    sessionStorage.setItem('graphics-failed-once', '1');
+    localStorage.setItem('dino3d.profile.v1', JSON.stringify({ bestScore: 12345, coins: 87, achievements: { 'first-run': 123 } }));
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (kind, ...args) {
+      return String(kind).includes('webgl') ? null : original.call(this, kind, ...args);
+    };
+  });
+  await fresh.goto(page.url());
+  const retry = await expectStartupError(fresh, /gráficos 3D/);
+  for (const viewport of [{ width: 320, height: 568 }, { width: 568, height: 320 }]) {
+    await fresh.setViewportSize(viewport);
+    await retry.scrollIntoViewIfNeeded();
+    const r = await retry.boundingBox();
+    assert.ok(r && r.y >= 0 && r.y + r.height <= viewport.height);
+  }
+  await expectRecovered(fresh, retry);
+  const saved = await fresh.evaluate(() => JSON.parse(localStorage.getItem('dino3d.profile.v1')));
+  assert.equal(saved.bestScore, 12345);
+  assert.equal(saved.coins, 87);
+  assert.equal(saved.achievements['first-run'], 123);
+});
+
+test('an exception during setup replaces the loader with a recoverable error', async (t) => {
+  const fresh = await startupPage(t, () => {
+    CanvasRenderingContext2D.prototype.createImageData = () => { throw new Error('Simulated setup failure'); };
+  });
+  await fresh.goto(page.url());
+  await expectStartupError(fresh, /No pudimos iniciar/);
+  assert.equal(await fresh.evaluate(() => !!window.__dino), false);
+});
+
+test('a missing game dependency can be downloaded again with retry', async (t) => {
+  const fresh = await startupPage(t);
+  let blocked = true;
+  await fresh.route('**/assets/three-*.js', (route) => blocked ? route.abort() : route.continue());
+  await fresh.goto(page.url());
+  const retry = await expectStartupError(fresh, /conexión a Internet/);
+  blocked = false;
+  await expectRecovered(fresh, retry);
+});
+
+test('a missing entry script still leaves a working retry link', async (t) => {
+  const fresh = await startupPage(t);
+  let blocked = true;
+  await fresh.route('**/assets/index-*.js', (route) => blocked ? route.abort() : route.continue());
+  await fresh.goto(page.url());
+  const retry = await expectStartupError(fresh, /No pudimos cargar/);
+  blocked = false;
+  await expectRecovered(fresh, retry);
+});
+
+test('failure on the first rendered frame cannot leave a loading screen', async (t) => {
+  const fresh = await startupPage(t, () => {
+    const original = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (callback) => original((time) => {
+      if (window.__dino) window.__dino.engine.renderer.render = () => { throw new Error('Simulated render failure'); };
+      callback(time);
+    });
+  });
+  await fresh.goto(page.url());
+  await expectStartupError(fresh, /No pudimos iniciar/);
+  assert.equal(await fresh.evaluate(() => window.__dino.engine.running), false);
+  assert.equal(await fresh.evaluate(() => window.__dino.input.enabled), false);
+});
+
+test('loss of the graphics context stops play and offers recovery', async (t) => {
+  const fresh = await startupPage(t);
+  await fresh.goto(page.url());
+  await fresh.waitForFunction(() => !!window.__dino && !document.getElementById('loading'));
+  await fresh.evaluate(() => {
+    const d = window.__dino;
+    d.engine.stop();
+    d.game.start();
+    const extension = d.engine.renderer.getContext().getExtension('WEBGL_lose_context');
+    if (!extension) throw new Error('WebGL context-loss testing is unavailable');
+    extension.loseContext();
+  });
+  const retry = await expectStartupError(fresh, /interrumpieron los gráficos/);
+  assert.equal(await fresh.evaluate(() => window.__dino.engine.running), false);
+  assert.equal(await fresh.evaluate(() => window.__dino.input.enabled), false);
+  await expectRecovered(fresh, retry);
+});
+
+test('an interrupted download eventually replaces the loading message', async (t) => {
+  const fresh = await startupPage(t, () => {
+    const original = window.setTimeout.bind(window);
+    window.setTimeout = (fn, delay, ...args) => original(fn, delay === 30000 ? 0 : delay, ...args);
+  });
+  await fresh.goto(page.url());
+  await expectStartupError(fresh, /tardando demasiado/);
+  assert.equal(await fresh.evaluate(() => !!window.__dino), false);
 });

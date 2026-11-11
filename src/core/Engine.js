@@ -6,15 +6,23 @@ import { CFG } from './Config.js';
  * knowledge so it can be reasoned about (and profiled) on its own.
  */
 export class Engine {
-  constructor(canvas) {
+  constructor(canvas, { onReady, onError } = {}) {
     this.canvas = canvas;
+    this.onReady = onReady;
+    this.onError = onError;
+    this._rendered = false;
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: true,
-      powerPreference: 'high-performance',
-      stencil: false,
-    });
+    try {
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        powerPreference: 'high-performance',
+        stencil: false,
+      });
+    } catch (error) {
+      error.code = 'WEBGL_UNAVAILABLE';
+      throw error;
+    }
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
@@ -41,7 +49,13 @@ export class Engine {
     this._raf = null;
     this._onResize = this._onResize.bind(this);
     this._tick = this._tick.bind(this);
+    this._onContextLost = () => {
+      const error = new Error('The WebGL context was lost.');
+      error.code = 'WEBGL_CONTEXT_LOST';
+      this._fail(error);
+    };
     window.addEventListener('resize', this._onResize);
+    canvas.addEventListener('webglcontextlost', this._onContextLost);
     this._onResize();
   }
 
@@ -77,7 +91,29 @@ export class Engine {
     this._raf = null;
   }
 
+  dispose() {
+    this.stop();
+    window.removeEventListener('resize', this._onResize);
+    this.canvas.removeEventListener('webglcontextlost', this._onContextLost);
+    this.renderer.dispose();
+  }
+
+  _fail(error) {
+    this.stop();
+    if (this.onError) this.onError(error);
+    else throw error;
+  }
+
   _tick() {
+    if (!this.running) return;
+    try {
+      this._renderFrame();
+    } catch (error) {
+      this._fail(error);
+    }
+  }
+
+  _renderFrame() {
     this._raf = requestAnimationFrame(this._tick);
     // Clamp so an alt-tab or a GC hitch never teleports the world.
     const raw = this.clock.getDelta();
@@ -95,5 +131,9 @@ export class Engine {
 
     for (let i = 0; i < this._updaters.length; i++) this._updaters[i](dt, this.elapsed);
     this.renderer.render(this.scene, this.camera);
+    if (!this._rendered) {
+      this._rendered = true;
+      this.onReady?.();
+    }
   }
 }

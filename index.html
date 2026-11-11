@@ -5,6 +5,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>DINO RUN 3D</title>
 <meta name="description" content="El dinosaurio de Chrome convertido en un endless runner 3D." />
+<script>
+// This fallback must run even when the module entry itself cannot be downloaded.
+document.addEventListener('error', function (event) {
+  if (!(event.target instanceof HTMLScriptElement) || event.target.type !== 'module') return;
+  function showLoadError() {
+    document.getElementById('loading')?.remove();
+    document.getElementById('startup-error').hidden = false;
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showLoadError, { once: true });
+  else showLoadError();
+}, true);
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap" />
@@ -16,7 +28,14 @@
   <canvas id="scene"></canvas>
   <div id="ui"></div>
   <div id="loading">Cargando…</div>
+  <div id="startup-error" hidden>
+    <section class="startup-panel" role="alert" aria-labelledby="startup-title">
+      <h1 id="startup-title">No pudimos cargar el juego</h1>
+      <p id="startup-message">Revisá tu conexión a Internet y volvé a intentarlo.</p>
+      <a class="startup-retry" href="">Reintentar</a>
+    </section>
+  </div>
 </div>
-<script type="module" src="/src/main.js"></script>
+<script type="module" src="/src/bootstrap.js"></script>
 </body>
 </html>
