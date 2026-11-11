@@ -90,6 +90,8 @@ En GitHub, seleccioná **Settings → Pages → Source → GitHub Actions** una 
 
 Cada ejecución conserva las capturas y el reporte de QA como artefacto durante siete días. Podés volver a ejecutar el flujo desde **Actions → Verify and publish → Run workflow**.
 
+La verificación de GitHub usa Ubuntu 24.04 y el Chrome preinstalado en ese entorno; registra su versión antes de ejecutar las pruebas. Así no necesita descargar otro navegador durante cada ejecución.
+
 ## Comprobación en dispositivos reales
 
 Antes de una entrega, abrí el enlace publicado en una PC y en un celular real: jugá, saltá, cambiá de carril, agachate, pausá, girá el celular, abrí los logros y comprobá que el récord sobreviva a una recarga. `F3` muestra los FPS en PC. La emulación y las pruebas con renderizado por software verifican comportamiento y recursos; sus FPS no representan el rendimiento del celular.

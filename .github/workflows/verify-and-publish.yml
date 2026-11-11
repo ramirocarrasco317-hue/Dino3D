@@ -17,7 +17,7 @@ concurrency:
 jobs:
   verify:
     name: Build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -28,8 +28,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Select the runner's Chrome
+        run: |
+          browser_path="$(command -v google-chrome)"
+          "$browser_path" --version
+          echo "DINO_BROWSER_PATH=$browser_path" >> "$GITHUB_ENV"
       - name: Verify production build
         run: npm run verify
       - name: Save QA screenshots and report
@@ -50,7 +53,7 @@ jobs:
     name: Publish to GitHub Pages
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
