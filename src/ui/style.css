@@ -704,4 +704,3 @@ input[type=range]::-moz-range-track, input[type=range]::-moz-range-thumb { borde
 @media (prefers-reduced-motion: reduce) {
   .screen.show { animation: none; }
 }
-
