@@ -1,409 +1,139 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp, lerp, damp } from '../core/MathUtils.js';
+import { surfaceTexture } from '../world/SurfaceTexture.js';
 
-/**
- * Procedural cartoon T-rex: the Chrome offline dino re-read as a chunky,
- * rounded 3D character. Everything is built from rounded boxes and spheres so
- * it stays a couple hundred triangles and needs no asset pipeline.
- *
- * Rig (all local groups, animated procedurally):
- *   root -> tilt -> body -> { neck -> head -> jaw, tailSegs[], arms, legs }
- */
-
-// The Chrome dino is flat grey; lifted here toward a sage green-grey so the
-// silhouette still reads as "that dinosaur" but survives a bright desert and a
-// dark volcanic night without turning into a blob.
-const SKIN = 0x668f77;
-const SKIN_DARK = 0x426b59;
-const SKIN_LIGHT = 0x729a7f;
-const SCALE_DARK = 0x5a816b;
-const BELLY = 0xf1dfbd;
-const EYE_WHITE = 0xf7f7f4;
-const EYE_DARK = 0x1d2220;
-const TOOTH = 0xfbf8ef;
-const CLAW = 0xd8cdb6;
-
-function mat(color, opts = {}) {
-  return new THREE.MeshStandardMaterial({
-    color,
-    roughness: opts.roughness ?? 0.78,
-    metalness: opts.metalness ?? 0.0,
-    ...opts,
-  });
+const SKIN = 0x68b86e;
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+function mat(color, textured = false) {
+  return new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.1, map: textured ? surfaceTexture('skin') : null });
+}
+function block(parent, material, size, position) {
+  const mesh = new THREE.Mesh(boxGeo, material);
+  mesh.scale.set(...size);
+  mesh.position.set(...position);
+  parent.add(mesh);
+  return mesh;
+}
+function joint(parent, position) {
+  const group = new THREE.Group();
+  group.position.set(...position);
+  parent.add(group);
+  return group;
 }
 
-function box(w, h, d, material, radius = 0.09, seg = 3) {
-  const r = Math.min(radius, Math.min(w, h, d) * 0.45);
-  const g = new RoundedBoxGeometry(w, h, d, seg, r);
-  const m = new THREE.Mesh(g, material);
-  m.castShadow = true;
-  return m;
-}
-
-function sphere(r, material, wseg = 14, hseg = 10) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, wseg, hseg), material);
-  m.castShadow = true;
-  return m;
-}
-
-function makeSkinTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  const image = ctx.createImageData(128, 128);
-  for (let y = 0; y < 128; y++) {
-    for (let x = 0; x < 128; x++) {
-      const u = x / 128, v = y / 128;
-      const broad = Math.sin(u * Math.PI * 6) * Math.sin(v * Math.PI * 4) * 9;
-      const grain = Math.sin(u * Math.PI * 36 + Math.sin(v * Math.PI * 8))
-        * Math.cos(v * Math.PI * 32) * 4;
-      const speckle = Math.sin(x * 47.17 + y * 91.31) * 3;
-      const value = Math.round(clamp(237 + broad + grain + speckle, 211, 255));
-      const i = (y * 128 + x) * 4;
-      image.data[i] = value;
-      image.data[i + 1] = value;
-      image.data[i + 2] = value;
-      image.data[i + 3] = 255;
-    }
+// Merge only rigid siblings with the same material. Animation pivots and the
+// skin material used by hurt feedback stay intact.
+function mergeRigidParts(group) {
+  const buckets = new Map();
+  for (const mesh of [...group.children]) {
+    if (!mesh.isMesh) continue;
+    mesh.updateMatrix();
+    const list = buckets.get(mesh.material) ?? [];
+    list.push(mesh.geometry.clone().applyMatrix4(mesh.matrix));
+    buckets.set(mesh.material, list);
+    group.remove(mesh);
   }
-  ctx.putImageData(image, 0, 0);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  texture.anisotropy = 2;
-  return texture;
+  for (const [material, geometries] of buckets) {
+    const geometry = mergeGeometries(geometries, false);
+    for (const part of geometries) part.dispose();
+    group.add(new THREE.Mesh(geometry, material));
+  }
 }
 
+/** Block-built T-rex, retaining the original movement rig and animation. */
 export class DinoModel {
   constructor() {
     this.root = new THREE.Group();
     this.root.name = 'dino';
-    // Built at a comfortable "1 unit ≈ 1 metre" scale, then trimmed so the
-    // silhouette matches the gameplay collider.
     this.root.scale.setScalar(0.78);
-
-    const hide = makeSkinTexture();
     this.materials = {
-      skin: mat(SKIN, { roughness: 0.82, map: hide, bumpMap: hide, bumpScale: 0.018 }),
-      skinDark: mat(SKIN_DARK, { roughness: 0.88, map: hide, bumpMap: hide, bumpScale: 0.012 }),
-      skinLight: mat(SKIN_LIGHT, { roughness: 0.82 }),
-      scaleDark: mat(SCALE_DARK, { roughness: 0.9 }),
-      belly: mat(BELLY, { roughness: 0.86 }),
-      eyeWhite: mat(EYE_WHITE, { roughness: 0.35 }),
-      eyeDark: mat(EYE_DARK, { roughness: 0.28 }),
-      tooth: mat(TOOTH, { roughness: 0.4 }),
-      claw: mat(CLAW, { roughness: 0.5 }),
+      skin: mat(SKIN, true), skinDark: mat(0x34734d), belly: mat(0xf7df9a),
+      eyeWhite: mat(0xfff4dc), eyeDark: mat(0x182634), tooth: mat(0xfff4dc),
     };
-
-    this.tilt = new THREE.Group();
-    this.root.add(this.tilt);
-
-    this.body = new THREE.Group();
-    this.body.position.y = 1.06;
-    this.tilt.add(this.body);
-
-    this._buildTorso();
-    this._buildHead();
-    this._buildTail();
-    this._buildArms();
-    this._buildLegs();
+    const m = this.materials;
+    this.tilt = joint(this.root, [0, 0, 0]);
+    this.body = joint(this.tilt, [0, 1.06, 0]);
+    block(this.body, m.skin, [0.86, 0.84, 1.24], [0, 0.04, 0]);
+    block(this.body, m.belly, [0.64, 0.22, 1.04], [0, -0.32, -0.08]);
+    block(this.body, m.belly, [0.52, 0.42, 0.06], [0, -0.08, -0.64]);
+    for (let i = 0; i < 4; i++) {
+      block(this.body, m.skinDark, [0.18, 0.18, 0.18], [0, 0.53, -0.36 + i * 0.28]);
+    }
+    this.neck = joint(this.body, [0, 0.4, -0.56]);
+    block(this.neck, m.skin, [0.44, 0.58, 0.44], [0, 0.2, -0.08]);
+    this.head = joint(this.neck, [0, 0.5, -0.3]);
+    this.head.scale.setScalar(1.12);
+    block(this.head, m.skin, [0.66, 0.56, 0.76], [0, 0.06, -0.16]);
+    block(this.head, m.skin, [0.54, 0.28, 0.44], [0, -0.02, -0.66]);
+    block(this.head, m.skinDark, [0.3, 0.08, 0.6], [0, 0.38, -0.16]);
+    this.eyes = [];
+    for (const side of [-1, 1]) {
+      const eye = joint(this.head, [side * 0.34, 0.16, -0.34]);
+      block(eye, m.eyeWhite, [0.04, 0.17, 0.2], [0, 0, 0]);
+      block(eye, m.eyeDark, [0.045, 0.09, 0.09], [side * 0.025, -0.01, -0.035]);
+      this.eyes.push(eye);
+      block(this.head, m.eyeDark, [0.025, 0.035, 0.09], [side * 0.275, 0.04, -0.76]);
+    }
+    this.jaw = joint(this.head, [0, -0.14, -0.2]);
+    block(this.jaw, m.skinDark, [0.52, 0.14, 0.7], [0, -0.03, -0.28]);
+    block(this.jaw, m.belly, [0.4, 0.06, 0.46], [0, -0.13, -0.38]);
+    this.tailSegs = [];
+    let parent = this.body;
+    for (const [i, s] of [[0.54, 0.5, 0.6, 0.68], [0.4, 0.36, 0.54, 0.5],
+      [0.28, 0.25, 0.5, 0.46], [0.16, 0.14, 0.42, 0.42]].entries()) {
+      const tail = joint(parent, [0, i === 0 ? 0.06 : 0, s[3]]);
+      block(tail, i === 3 ? m.skinDark : m.skin, s.slice(0, 3), [0, 0, s[2] * 0.35]);
+      this.tailSegs.push(tail);
+      parent = tail;
+    }
+    this.arms = [];
+    this.legs = [];
+    for (const side of [-1, 1]) {
+      const shoulder = joint(this.body, [side * 0.5, 0.18, -0.32]);
+      block(shoulder, m.skin, [0.18, 0.34, 0.18], [0, -0.16, 0]);
+      const elbow = joint(shoulder, [0, -0.32, 0]);
+      block(elbow, m.skin, [0.15, 0.26, 0.15], [0, -0.12, 0]);
+      this.arms.push({ shoulder, elbow, side });
+      const hip = joint(this.body, [side * 0.34, -0.2, 0.13]);
+      block(hip, m.skin, [0.4, 0.56, 0.46], [0, -0.2, 0]);
+      const knee = joint(hip, [0, -0.42, 0]);
+      block(knee, m.skin, [0.24, 0.4, 0.26], [0, -0.18, 0]);
+      const ankle = joint(knee, [0, -0.34, 0]);
+      block(ankle, m.skinDark, [0.32, 0.15, 0.56], [0, -0.035, -0.14]);
+      this.legs.push({ hip, knee, ankle, side });
+    }
+    const rigGroups = [];
+    this.tilt.traverse(node => { if (node.isGroup) rigGroups.push(node); });
+    for (const group of rigGroups) mergeRigidParts(group);
     this._buildBlobShadow();
-
-    // Animation state
     this.phase = 0;
     this.state = 'run';
     this._blink = 2.5;
-    this._blinkAmt = 0;
-    this._duckAmt = 0;
-    this._airAmt = 0;
+    this._blinkAmt = this._duckAmt = this._airAmt = this._landPulse = this._deadT = this._hurtFlash = 0;
     this._wasGrounded = true;
-    this._landPulse = 0;
-    this._deadT = 0;
-    this._hurtFlash = 0;
     this._baseColor = new THREE.Color(SKIN);
+    this._hurtColor = new THREE.Color(0xff5a4a);
   }
 
-  _buildTorso() {
-    // A single tapered capsule-ish trunk reads far cleaner than a box plus
-    // bulging spheres: the silhouette stays a dinosaur from every angle.
-    const torso = box(0.86, 0.9, 1.3, this.materials.skin, 0.4, 5);
-    torso.position.set(0, 0.04, 0.0);
-    this.body.add(torso);
-    this.torso = torso;
-
-    const chest = sphere(0.42, this.materials.skin, 16, 12);
-    chest.position.set(0, 0.12, -0.5);
-    chest.scale.set(1.0, 1.02, 0.86);
-    this.body.add(chest);
-
-    const hips = sphere(0.44, this.materials.skin, 16, 12);
-    hips.position.set(0, -0.02, 0.46);
-    hips.scale.set(1.02, 1.0, 0.94);
-    this.body.add(hips);
-
-    // Cream underside, pushed forward and down so it actually shows.
-    const belly = box(0.62, 0.5, 1.06, this.materials.belly, 0.24, 4);
-    belly.position.set(0, -0.3, -0.12);
-    belly.castShadow = false;
-    this.body.add(belly);
-
-    const chestPatch = sphere(0.3, this.materials.belly, 14, 10);
-    chestPatch.position.set(0, -0.12, -0.62);
-    chestPatch.scale.set(0.92, 1.05, 0.62);
-    chestPatch.castShadow = false;
-    this.body.add(chestPatch);
-
-    // Low-profile flank scales add texture without looking like beads.
-    const scaleGeo = new THREE.SphereGeometry(1, 8, 6);
-    for (const side of [-1, 1]) {
-      for (let row = 0; row < 2; row++) {
-        for (let i = 0; i < 5; i++) {
-          const scale = new THREE.Mesh(scaleGeo,
-            (row + i) % 3 === 0 ? this.materials.skinLight : this.materials.scaleDark);
-          scale.position.set(side * (0.426 + row * 0.004),
-            0.24 - row * 0.14, -0.41 + i * 0.22 + (row % 2) * 0.1);
-          scale.scale.set(0.009, 0.022, 0.038);
-          scale.rotation.x = -0.25;
-          scale.castShadow = false;
-          this.body.add(scale);
-        }
-      }
-    }
-
-    // Spine scutes: a strong, cheap silhouette cue from behind and the side.
-    const scuteGeo = new THREE.ConeGeometry(1, 1, 4);
-    for (let i = 0; i < 6; i++) {
-      const t = i / 5;
-      const s = 0.13 - Math.abs(t - 0.35) * 0.09;
-      const scute = new THREE.Mesh(scuteGeo, this.materials.skinDark);
-      scute.castShadow = true;
-      scute.position.set(0, 0.44 - t * 0.06, -0.5 + i * 0.2);
-      scute.scale.set(s * 1.1, s * 1.7, s * 1.8);
-      scute.rotation.x = -0.12;
-      scute.rotation.y = Math.PI / 4;
-      this.body.add(scute);
-    }
-  }
-
-  _buildHead() {
-    this.neck = new THREE.Group();
-    this.neck.position.set(0, 0.4, -0.56);
-    this.body.add(this.neck);
-
-    const neckMesh = box(0.46, 0.6, 0.46, this.materials.skin, 0.2, 3);
-    neckMesh.position.set(0, 0.22, -0.09);
-    neckMesh.rotation.x = 0.24;
-    this.neck.add(neckMesh);
-
-    // Shoulder blend: without it the neck reads as a separate block bolted on.
-    const shoulder = sphere(0.36, this.materials.skin, 16, 12);
-    shoulder.position.set(0, -0.02, 0.06);
-    shoulder.scale.set(1.05, 0.95, 1.0);
-    this.neck.add(shoulder);
-
-    this.head = new THREE.Group();
-    this.head.position.set(0, 0.5, -0.3);
-    // Slightly oversized head: the cartoon read the whole character hangs on.
-    this.head.scale.setScalar(1.12);
-    this.neck.add(this.head);
-
-    const skull = box(0.62, 0.56, 0.78, this.materials.skin, 0.22, 4);
-    skull.position.set(0, 0.06, -0.16);
-    this.head.add(skull);
-
-    const snout = box(0.5, 0.3, 0.46, this.materials.skin, 0.13, 3);
-    snout.position.set(0, -0.02, -0.66);
-    this.head.add(snout);
-
-    for (const side of [-1, 1]) {
-      const mouthSeam = box(0.015, 0.018, 0.35, this.materials.skinDark, 0.005, 2);
-      mouthSeam.position.set(side * 0.253, -0.153, -0.61);
-      mouthSeam.castShadow = false;
-      this.head.add(mouthSeam);
-    }
-
-    const nostrilGeo = new THREE.SphereGeometry(0.035, 8, 6);
-    for (const sx of [-1, 1]) {
-      const n = new THREE.Mesh(nostrilGeo, this.materials.eyeDark);
-      n.position.set(sx * 0.13, 0.06, -0.87);
-      this.head.add(n);
-    }
-
-    // A darker crest along the top of the skull instead of a brow ridge: it
-    // shapes the head without reading as a horn from the side.
-    const crest = box(0.3, 0.1, 0.62, this.materials.skinDark, 0.045, 2);
-    crest.position.set(0, 0.3, -0.2);
-    crest.rotation.x = -0.06;
-    this.head.add(crest);
-
-    this.eyes = [];
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Group();
-      eye.position.set(sx * 0.26, 0.13, -0.38);
-      // Angled outward so the pupil is visible from behind AND from the side.
-      eye.rotation.y = sx * 0.62;
-      const socket = sphere(0.105, this.materials.skinDark, 12, 10);
-      socket.castShadow = false;
-      eye.add(socket);
-      const white = sphere(0.076, this.materials.eyeWhite, 12, 10);
-      white.position.set(sx * 0.027, 0, -0.025);
-      white.castShadow = false;
-      eye.add(white);
-      const pupil = sphere(0.044, this.materials.eyeDark, 10, 8);
-      pupil.position.set(sx * 0.072, 0.004, -0.042);
-      pupil.castShadow = false;
-      eye.add(pupil);
-      const glint = sphere(0.014, this.materials.eyeWhite, 8, 6);
-      glint.position.set(sx * 0.092, 0.025, -0.053);
-      glint.castShadow = false;
-      eye.add(glint);
-      this.head.add(eye);
-      this.eyes.push(eye);
-    }
-
-    this.jaw = new THREE.Group();
-    this.jaw.position.set(0, -0.14, -0.2);
-    this.head.add(this.jaw);
-    const jawMesh = box(0.5, 0.2, 0.72, this.materials.skin, 0.08, 3);
-    jawMesh.position.set(0, -0.03, -0.28);
-    this.jaw.add(jawMesh);
-
-    // Two small teeth peeking out - pure cartoon charm, ~20 tris.
-    const toothGeo = new THREE.ConeGeometry(0.045, 0.13, 5);
-    for (const sx of [-1, 1]) {
-      const t = new THREE.Mesh(toothGeo, this.materials.tooth);
-      t.position.set(sx * 0.16, -0.06, -0.58);
-      t.rotation.x = Math.PI;
-      this.head.add(t);
-    }
-  }
-
-  _buildTail() {
-    this.tailSegs = [];
-    let parent = this.body;
-    const segs = [
-      { w: 0.56, h: 0.56, d: 0.6, z: 0.72 },
-      { w: 0.44, h: 0.44, d: 0.56, z: 0.5 },
-      { w: 0.32, h: 0.32, d: 0.52, z: 0.46 },
-      { w: 0.2, h: 0.2, d: 0.46, z: 0.42 },
-    ];
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      const g = new THREE.Group();
-      g.position.set(0, i === 0 ? 0.06 : 0, s.z);
-      const mesh = sphere(1, i > 2 ? this.materials.skinDark : this.materials.skin, 16, 12);
-      mesh.scale.set(s.w * 0.56, s.h * 0.54, s.d * 0.75);
-      mesh.position.z = s.d * 0.35;
-      g.add(mesh);
-      parent.add(g);
-      parent = g;
-      this.tailSegs.push(g);
-    }
-  }
-
-  _buildArms() {
-    this.arms = [];
-    for (const sx of [-1, 1]) {
-      const shoulder = new THREE.Group();
-      shoulder.position.set(sx * 0.5, 0.18, -0.32);
-      this.body.add(shoulder);
-
-      const upper = box(0.18, 0.34, 0.18, this.materials.skin, 0.07, 2);
-      upper.position.y = -0.16;
-      shoulder.add(upper);
-
-      const elbow = new THREE.Group();
-      elbow.position.y = -0.32;
-      shoulder.add(elbow);
-
-      const fore = box(0.15, 0.26, 0.15, this.materials.skin, 0.06, 2);
-      fore.position.y = -0.12;
-      elbow.add(fore);
-
-      const clawGeo = new THREE.ConeGeometry(0.035, 0.12, 5);
-      for (let c = -1; c <= 1; c += 2) {
-        const cl = new THREE.Mesh(clawGeo, this.materials.claw);
-        cl.position.set(c * 0.05, -0.3, -0.03);
-        cl.rotation.x = -2.4;
-        elbow.add(cl);
-      }
-      this.arms.push({ shoulder, elbow, side: sx });
-    }
-  }
-
-  /**
-   * Leg lengths are set so the sole lands on local y = 0 with the body at its
-   * rest height - no floating, no feet through the floor.
-   * body 0.94 -> hip 0.70 -> knee 0.34 -> ankle 0.07 -> sole ~0.
-   */
-  _buildLegs() {
-    this.legs = [];
-    for (const sx of [-1, 1]) {
-      const hip = new THREE.Group();
-      hip.position.set(sx * 0.34, -0.2, 0.13);
-      this.body.add(hip);
-
-      const thigh = box(0.42, 0.58, 0.5, this.materials.skin, 0.19, 3);
-      thigh.position.y = -0.2;
-      hip.add(thigh);
-
-      const knee = new THREE.Group();
-      knee.position.y = -0.42;
-      hip.add(knee);
-
-      const shin = box(0.25, 0.42, 0.28, this.materials.skin, 0.1, 3);
-      shin.position.y = -0.18;
-      knee.add(shin);
-
-      const ankle = new THREE.Group();
-      ankle.position.y = -0.34;
-      knee.add(ankle);
-
-      const foot = box(0.32, 0.15, 0.58, this.materials.skinDark, 0.07, 2);
-      foot.position.set(0, -0.035, -0.14);
-      ankle.add(foot);
-
-      const toeGeo = new THREE.ConeGeometry(0.04, 0.1, 5);
-      for (let t = -1; t <= 1; t++) {
-        const toe = new THREE.Mesh(toeGeo, this.materials.claw);
-        toe.position.set(t * 0.09, -0.06, -0.4);
-        toe.rotation.x = -1.9;
-        ankle.add(toe);
-      }
-      this.legs.push({ hip, knee, ankle, side: sx });
-    }
-  }
-
-  /** Soft contact shadow so the dino never looks like it floats. */
   _buildBlobShadow() {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const ctx = c.getContext('2d');
-    const grd = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
-    grd.addColorStop(0, 'rgba(0,0,0,0.55)');
-    grd.addColorStop(0.55, 'rgba(0,0,0,0.22)');
-    grd.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grd;
-    ctx.fillRect(0, 0, 128, 128);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.55, 1.15),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.85 }),
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.015;
-    mesh.renderOrder = 2;
-    this.blobShadow = mesh;
-    this.root.add(mesh);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 16;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#26303d';
+    ctx.fillRect(3, 2, 10, 12);
+    ctx.fillRect(1, 4, 14, 8);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = texture.minFilter = THREE.NearestFilter;
+    this.blobShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.55, 1.15),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.3, depthWrite: false }));
+    this.blobShadow.rotation.x = -Math.PI / 2;
+    this.blobShadow.position.y = 0.015;
+    this.blobShadow.renderOrder = 2;
+    this.root.add(this.blobShadow);
   }
 
-  setShadowCasting(on) {
-    this.root.traverse((o) => { if (o.isMesh) o.castShadow = on && o !== this.blobShadow; });
-    if (this.blobShadow) this.blobShadow.castShadow = false;
-  }
+  setShadowCasting() { /* The pixel contact sprite replaces shadow maps. */ }
 
   flashHurt() { this._hurtFlash = 1; }
 
@@ -557,7 +287,7 @@ export class DinoModel {
     if (this._hurtFlash > 0) {
       this._hurtFlash = Math.max(0, this._hurtFlash - dt * 3.2);
       const k = Math.sin(this._hurtFlash * 30) * 0.5 + 0.5;
-      this.materials.skin.color.copy(this._baseColor).lerp(new THREE.Color(0xff5a4a), k * this._hurtFlash * 0.8);
+      this.materials.skin.color.copy(this._baseColor).lerp(this._hurtColor, k * this._hurtFlash * 0.8);
     } else {
       this.materials.skin.color.copy(this._baseColor);
     }
@@ -569,7 +299,7 @@ export class DinoModel {
       // pinned to the ground plane while the dino is in the air.
       this.blobShadow.position.y = (0.015 - h) / this.root.scale.y;
       this.blobShadow.scale.setScalar(lerp(0.55, 1, k));
-      this.blobShadow.material.opacity = 0.85 * k;
+      this.blobShadow.material.opacity = 0.3 * k;
     }
   }
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { pixelMaterial } from '../world/PixelMaterial.js';
 import { bakeInPlace } from '../world/bake.js';
 import { surfaceTexture } from '../world/SurfaceTexture.js';
 
@@ -28,8 +28,6 @@ function finishHazard(root, type) {
     if (!material) {
       material = node.material.clone();
       material.map = texture;
-      material.bumpMap = texture;
-      material.bumpScale = type === 'stone' ? 0.026 : 0.016;
       material.emissive.setHex(tint);
       material.emissiveIntensity = 0;
       material.needsUpdate = true;
@@ -52,7 +50,7 @@ export function setObstacleNight(night, iceMix = 0) {
 function M(color, opts = {}) {
   const key = color + JSON.stringify(opts);
   if (!cache.has(key)) {
-    cache.set(key, new THREE.MeshStandardMaterial({
+    cache.set(key, pixelMaterial({
       color, roughness: opts.roughness ?? 0.75, metalness: opts.metalness ?? 0,
       flatShading: opts.flat ?? false,
       side: opts.side ?? THREE.FrontSide,
@@ -64,11 +62,11 @@ function M(color, opts = {}) {
 
 const geoCache = new Map();
 const g = (k, f) => { if (!geoCache.has(k)) geoCache.set(k, f()); return geoCache.get(k); };
-const CYL = (r = 8) => g(`c${r}`, () => new THREE.CylinderGeometry(1, 1, 1, r));
-const SPH = () => g('s', () => new THREE.SphereGeometry(1, 10, 8));
-const CONE = (r = 6) => g(`k${r}`, () => new THREE.ConeGeometry(1, 1, r));
-const ICO = () => g('i', () => new THREE.IcosahedronGeometry(1, 0));
-const RBOX = () => g('rb', () => new RoundedBoxGeometry(1, 1, 1, 2, 0.15));
+const CYL = (r = 8) => g(`c${r}`, () => new THREE.BoxGeometry(1.6, 1, 1.6));
+const SPH = () => g('s', () => new THREE.BoxGeometry(1.6, 1.6, 1.6));
+const CONE = (r = 6) => g(`k${r}`, () => new THREE.ConeGeometry(1, 1, 4));
+const ICO = () => g('i', () => new THREE.BoxGeometry(1.5, 1.5, 1.5));
+const RBOX = () => g('rb', () => new THREE.BoxGeometry(1, 1, 1));
 
 function wingMembrane(side, outer = false) {
   return g(`wing-${side}-${outer}`, () => {
@@ -107,39 +105,17 @@ function put(parent, geometry, material, pos, scale, rot) {
   return m;
 }
 
-/** Rings of tiny spines: cheap detail that reads instantly as "cactus". */
-function addSpines(parent, rng, height, radius, count = 6) {
-  const mat = M(SPINE, { roughness: 0.6 });
-  const geo = CONE(4);
-  for (let i = 0; i < count; i++) {
-    const y = 0.25 + (i / count) * (height - 0.4);
-    const a = rng.range(0, Math.PI * 2);
-    put(parent, geo, mat,
-      [Math.cos(a) * radius, y, Math.sin(a) * radius],
-      [0.035, 0.13, 0.035],
-      [Math.sin(a) * 1.35, 0, -Math.cos(a) * 1.35]);
-  }
+/** Pixel highlights replace dozens of tiny cone spines. */
+function addSpines(parent, rng, height, radius) {
+  put(parent, RBOX(), M(SPINE), [radius * 0.81, height * 0.62, radius * 0.81], [0.04, 0.12, 0.04]);
 }
-
-/** Vertical ribs give the trunk a saguaro read without extra draw calls. */
 function cactusTrunk(parent, rng, h, r) {
-  const body = put(parent, CYL(9), M(CACTUS, { roughness: 0.7 }), [0, h / 2, 0], [r, h, r]);
-  put(parent, SPH(), M(CACTUS, { roughness: 0.7 }), [0, h, 0], [r, r * 0.95, r]);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    put(parent, CYL(5), M(CACTUS_DARK, { roughness: 0.75 }),
-      [Math.cos(a) * r * 0.92, h / 2, Math.sin(a) * r * 0.92], [r * 0.13, h * 0.94, r * 0.13]);
-  }
-  return body;
+  return put(parent, CYL(), M(CACTUS), [0, h / 2, 0], [r, h, r]);
 }
-
 function cactusArm(parent, rng, side, atY, armH, r) {
-  const mat = M(CACTUS, { roughness: 0.7 });
-  const x = side * r;
-  put(parent, CYL(7), mat, [x + side * 0.16, atY, 0], [r * 0.62, 0.42, r * 0.62], [0, 0, Math.PI / 2]);
-  put(parent, SPH(), mat, [x + side * 0.34, atY, 0], [r * 0.62, r * 0.62, r * 0.62]);
-  put(parent, CYL(7), mat, [x + side * 0.34, atY + armH / 2, 0], [r * 0.62, armH, r * 0.62]);
-  put(parent, SPH(), mat, [x + side * 0.34, atY + armH, 0], [r * 0.62, r * 0.6, r * 0.62]);
+  const material = M(CACTUS);
+  put(parent, RBOX(), material, [side * (r + 0.14), atY, 0], [0.32, r, r]);
+  put(parent, RBOX(), material, [side * (r + 0.3), atY + armH / 2, 0], [r, armH + r, r]);
 }
 
 // --- builders --------------------------------------------------------------

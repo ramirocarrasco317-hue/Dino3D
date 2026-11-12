@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { pixelMaterial } from './PixelMaterial.js';
 import { bakeGroup } from './bake.js';
 
 /**
@@ -15,7 +15,7 @@ export function bmat(color, opts = {}) {
   const key = `${color}|${JSON.stringify(opts)}`;
   let m = matCache.get(key);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({
+    m = pixelMaterial({
       color, roughness: opts.roughness ?? 0.9, metalness: opts.metalness ?? 0,
       flatShading: opts.flat ?? false,
       emissive: opts.emissive ?? 0x000000,
@@ -36,11 +36,11 @@ function geo(key, build) {
 }
 
 const G = {
-  cone: (rs = 8) => geo(`cone${rs}`, () => new THREE.ConeGeometry(1, 1, rs)),
-  cyl: (rs = 8) => geo(`cyl${rs}`, () => new THREE.CylinderGeometry(1, 1, 1, rs)),
-  sph: (w = 10, h = 8) => geo(`sph${w}_${h}`, () => new THREE.SphereGeometry(1, w, h)),
-  ico: (d = 0) => geo(`ico${d}`, () => new THREE.IcosahedronGeometry(1, d)),
-  rbox: () => geo('rbox', () => new RoundedBoxGeometry(1, 1, 1, 2, 0.14)),
+  cone: (rs = 8) => geo(`cone${rs}`, () => new THREE.ConeGeometry(1, 1, 4)),
+  cyl: (rs = 8) => geo(`cyl${rs}`, () => new THREE.BoxGeometry(1.6, 1, 1.6)),
+  sph: (w = 10, h = 8) => geo(`sph${w}_${h}`, () => new THREE.BoxGeometry(1.65, 1.65, 1.65)),
+  ico: (d = 0) => geo(`ico${d}`, () => new THREE.BoxGeometry(1.5, 1.5, 1.5)),
+  rbox: () => geo('rbox', () => new THREE.BoxGeometry(1, 1, 1)),
   plane: () => geo('plane', () => new THREE.PlaneGeometry(1, 1)),
 };
 

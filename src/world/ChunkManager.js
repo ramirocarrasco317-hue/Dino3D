@@ -13,7 +13,7 @@ import { createCoin, createPowerUp, animateCoin, animatePowerUp } from '../entit
 const TRACK_HALF = 4.3;
 const GROUND_HALF = 30;
 const BERM_INNER = 5.0;
-const BERM_SEGS = 14;
+const BERM_SEGS = 8;
 
 const GROUND_BUILDERS = [
   { fn: cactusSmall, w: 4 },
@@ -162,15 +162,17 @@ export class ChunkManager {
 
     this.materials = {
       ground: makeBiomeMaterial({ roughness: 1, extra: {
-        map: surfaceTexture('ground'), bumpMap: surfaceTexture('ground'), bumpScale: 0.022,
+        map: surfaceTexture('ground'),
       } }),
       track: makeBiomeMaterial({ roughness: 0.92, extra: {
-        map: surfaceTexture('track'), bumpMap: surfaceTexture('track'), bumpScale: 0.018,
+        map: surfaceTexture('track'),
       } }),
       seam: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.19, depthWrite: false }),
       rail: makeBiomeMaterial({ roughness: 0.85 }),
     };
 
+    this._biomeA = new THREE.Color();
+    this._biomeB = new THREE.Color();
     this.chunks = [];
     for (let i = 0; i < CFG.world.activeChunks; i++) {
       const c = new Chunk(i, this.materials);
@@ -507,7 +509,7 @@ export class ChunkManager {
     const { a, b, t } = this.biomeAt(chunk.distStart + L * 0.5);
     const biome = this.rng.next() < t ? BIOMES[b] : BIOMES[a];
 
-    const count = Math.round(L * 0.42 * biome.density);
+    const count = Math.round(L * 0.26 * biome.density);
     for (let i = 0; i < count; i++) {
       const key = biome.id;
       let obj = null;
@@ -569,9 +571,9 @@ export class ChunkManager {
   syncBiome() {
     const { zNear, zFar, a, b } = this.boundaryZ();
     const A = BIOMES[a], B = BIOMES[b];
-    setBiomeColors(this.materials.ground, new THREE.Color(A.ground), new THREE.Color(B.ground), zFar, zNear);
-    setBiomeColors(this.materials.track, new THREE.Color(A.track), new THREE.Color(B.track), zFar, zNear);
-    setBiomeColors(this.materials.rail, new THREE.Color(A.trackEdge), new THREE.Color(B.trackEdge), zFar, zNear);
+    setBiomeColors(this.materials.ground, this._biomeA.set(A.ground), this._biomeB.set(B.ground), zFar, zNear);
+    setBiomeColors(this.materials.track, this._biomeA.set(A.track), this._biomeB.set(B.track), zFar, zNear);
+    setBiomeColors(this.materials.rail, this._biomeA.set(A.trackEdge), this._biomeB.set(B.trackEdge), zFar, zNear);
     return this.biomeAt(this.distance);
   }
 

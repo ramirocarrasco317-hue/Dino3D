@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pixelMaterial } from './PixelMaterial.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
@@ -14,7 +15,7 @@ function bakedMaterial(opts) {
   const key = JSON.stringify(opts);
   let m = bakedMaterials.get(key);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({
+    m = pixelMaterial({
       vertexColors: true,
       roughness: opts.roughness ?? 0.85,
       metalness: opts.metalness ?? 0,

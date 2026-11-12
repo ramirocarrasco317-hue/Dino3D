@@ -1,6 +1,6 @@
 # Dino3D
 
-Juego de carreras infinitas en 3D inspirado en el dinosaurio de Chrome, desarrollado con Three.js y Vite.
+Juego de carreras infinitas en 3D inspirado en el dinosaurio de Chrome, desarrollado con Three.js y Vite. Esta versión local usa una estética pixel art, modelos de bloques y menús de estilo arcade.
 
 [![Verificación y publicación](https://github.com/ramirocarrasco317-hue/Dino3D/actions/workflows/verify-and-publish.yml/badge.svg)](https://github.com/ramirocarrasco317-hue/Dino3D/actions/workflows/verify-and-publish.yml)
 
@@ -95,3 +95,16 @@ La verificación de GitHub usa Ubuntu 24.04 y el Chrome preinstalado en ese ento
 ## Comprobación en dispositivos reales
 
 Antes de una entrega, abrí el enlace publicado en una PC y en un celular real: jugá, saltá, cambiá de carril, agachate, pausá, girá el celular, abrí los logros y comprobá que el récord sobreviva a una recarga. `F3` muestra los FPS en PC. La emulación y las pruebas con renderizado por software verifican comportamiento y recursos; sus FPS no representan el rendimiento del celular.
+
+## Pixel Edition
+
+La perspectiva, los carriles, los saltos, las colisiones y el guardado se conservan. Los cambios gráficos reducen el trabajo de renderizado:
+
+- Mundo a resolución interna reducida y ampliación por vecino más cercano. La interfaz mantiene su resolución completa.
+- Dinosaurio construido con bloques: 398 triángulos y 28 mallas, frente a 16.162 triángulos y 76 mallas del modelo anterior.
+- Texturas de 16 × 16 con filtro de píxeles; mipmaps para evitar parpadeos en superficies lejanas.
+- Iluminación difusa con dos luces, sin mapas de sombras ni mapas de relieve. La sombra del dinosaurio es un pequeño sprite.
+- Seis nubes de bloques, menos decoración lateral y hasta 192 partículas en lugar de 520.
+- Icono local y fuentes del sistema: no se descargan fuentes para jugar.
+
+La resolución se adapta al rendimiento, con un máximo inicial de 640 píxeles en el lado mayor y bloques de al menos 2 píxeles CSS. Se configura en `src/core/Config.js`. `F3` muestra los FPS; `window.__dino.stats()` también informa la resolución interna y las órdenes de dibujo. Las cifras de FPS del navegador de pruebas por software no representan el rendimiento de la GPU del equipo.

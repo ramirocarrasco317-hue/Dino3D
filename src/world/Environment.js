@@ -4,6 +4,15 @@ import { CFG } from '../core/Config.js';
 import { clamp, lerp, smoothstep } from '../core/MathUtils.js';
 import { BIOMES } from './Biomes.js';
 
+const PALETTE_B = new THREE.Color();
+const NIGHT_TOP = new THREE.Color(0x101b34);
+const NIGHT_HORIZON = new THREE.Color(0x35435e);
+const DUSK = new THREE.Color(0xff8a4a);
+const SUNSET = new THREE.Color(0xff9a55);
+const MOON = new THREE.Color(0x9db8ff);
+const NIGHT_FILL = new THREE.Color(0x8198c4);
+const WHITE = new THREE.Color(0xffffff);
+
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
 void main() {
@@ -30,20 +39,13 @@ float hash13(vec3 p) {
 }
 
 float starField(vec3 d) {
-  vec3 p = d * 130.0;
-  vec3 id = floor(p);
-  vec3 f = fract(p);
-  float r = hash13(id);
-  if (r < 0.9865) return 0.0;
-  vec3 c = vec3(hash13(id + 11.0), hash13(id + 23.0), hash13(id + 37.0));
-  float dd = length(f - c);
-  return smoothstep(0.16, 0.0, dd) * (0.45 + 0.55 * hash13(id + 51.0));
+  return step(0.998, hash13(floor(d * 100.0))) * 0.8;
 }
 
 void main() {
   vec3 d = normalize(vDir);
   float h = d.y;
-  float t = smoothstep(-0.18, 0.62, h);
+  float t = floor(smoothstep(-0.18, 0.62, h) * 6.0) / 6.0;
   vec3 col = mix(uHorizon, uTop, t);
 
   float sd = max(dot(d, uSunDir), 0.0);
@@ -87,7 +89,7 @@ export class Environment {
       uNight: { value: 0 },
     };
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(300, 32, 20),
+      new THREE.SphereGeometry(300, 12, 8),
       new THREE.ShaderMaterial({
         vertexShader: SKY_VERT,
         fragmentShader: SKY_FRAG,
@@ -101,41 +103,13 @@ export class Environment {
     this.sky.renderOrder = -1000;
     scene.add(this.sky);
 
-    this.hemi = new THREE.HemisphereLight(0xbcd8f0, 0x8a6a44, 0.7);
+    // One key light plus hemisphere fill: clear block faces without shadows.
+    this.hemi = new THREE.HemisphereLight(0xbcd8f0, 0x8a6a44, 0.85);
     scene.add(this.hemi);
-
-    this.ambient = new THREE.AmbientLight(0xffffff, 0.22);
-    scene.add(this.ambient);
-
-    this.sun = new THREE.DirectionalLight(0xfff2d0, 2.5);
-    this.sun.castShadow = true;
-    const s = this.sun.shadow;
-    s.mapSize.set(CFG.quality.shadowMapSize, CFG.quality.shadowMapSize);
-    s.camera.near = 1;
-    s.camera.far = 190;
-    s.camera.left = -22; s.camera.right = 22;
-    s.camera.top = 26; s.camera.bottom = -34;
-    s.bias = -0.0007;
-    s.normalBias = 0.035;
-    s.radius = 2.2;
-    // The player never leaves the origin (the world scrolls past), so the
-    // shadow frustum can stay pinned - no per-frame refit, no shimmer.
+    this.sun = new THREE.DirectionalLight(0xfff2d0, 1.6);
+    this.sun.castShadow = false;
     this.sun.target.position.set(0, 0, -16);
-    scene.add(this.sun);
-    scene.add(this.sun.target);
-
-    // Rim / fill light from behind keeps the dino readable against the ground.
-    this.rim = new THREE.DirectionalLight(0xbfd8ff, 0.55);
-    this.rim.position.set(-8, 6, 10);
-    scene.add(this.rim);
-
-    // Camera-side moon fill gives near hazards shape in the darkest biomes.
-    // It casts no shadows, so night remains inexpensive to render.
-    this.moonFill = new THREE.DirectionalLight(0xc5dcff, 0);
-    this.moonFill.position.set(5, 13, 12);
-    this.moonFill.target.position.set(0, 0, -22);
-    scene.add(this.moonFill);
-    scene.add(this.moonFill.target);
+    scene.add(this.sun, this.sun.target);
 
     this._clouds = this._buildClouds();
     scene.add(this._clouds);
@@ -156,27 +130,24 @@ export class Environment {
 
   _buildClouds() {
     const g = new THREE.Group();
-    const geo = new THREE.IcosahedronGeometry(1, 1);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 1, metalness: 0, flatShading: true,
-      transparent: true, opacity: 0.9, fog: false,
-    });
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
     this.cloudMat = mat;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 6; i++) {
       const cloud = new THREE.Group();
       const puffs = 3 + ((i * 7) % 3);
       const parts = [];
       for (let p = 0; p < puffs; p++) {
         const g2 = geo.clone();
         const s = 5 + ((i + p) % 3) * 2.2;
-        g2.scale(s, s, s);
+        g2.scale(s * 1.8, s * 0.65, s * 0.9);
         g2.translate((p - puffs / 2) * 6 + Math.sin(i + p) * 2, Math.cos(i * 2 + p) * 1.8, Math.sin(i * 3 + p) * 3);
         parts.push(g2);
       }
-      // One merged puff-cluster per cloud keeps the sky at 12 draw calls.
+      // Six merged block clouds, with opaque unlit faces.
       const merged = mergeGeometries(parts, false);
       cloud.add(new THREE.Mesh(merged, mat));
-      const a = (i / 12) * Math.PI * 2;
+      const a = (i / 6) * Math.PI * 2;
       const r = 150 + (i % 3) * 30;
       cloud.position.set(Math.cos(a) * r, 55 + (i % 4) * 12, Math.sin(a) * r);
       cloud.userData.speed = 0.6 + (i % 5) * 0.25;
@@ -186,10 +157,10 @@ export class Environment {
   }
 
   _mixPalette(a, b, t) {
-    const out = {};
+    const out = this.current ?? {};
     const keys = ['ground', 'groundB', 'track', 'trackEdge', 'rock', 'rockDark', 'sky', 'skyHorizon', 'fog', 'sun', 'ambient'];
     for (const k of keys) {
-      out[k] = new THREE.Color(a[k]).lerp(new THREE.Color(b[k]), t);
+      (out[k] ??= new THREE.Color()).set(a[k]).lerp(PALETTE_B.set(b[k]), t);
     }
     out.sunIntensity = lerp(a.sunIntensity, b.sunIntensity, t);
     out.ambientIntensity = lerp(a.ambientIntensity, b.ambientIntensity, t);
@@ -226,14 +197,14 @@ export class Environment {
     // --- sky ----------------------------------------------------------------
     const top = this._tmpA.copy(p.sky);
     const hor = this._tmpB.copy(p.skyHorizon);
-    const nightTop = 0x101b34, nightHor = 0x35435e;
-    top.lerp(new THREE.Color(nightTop), night * 0.92);
-    hor.lerp(new THREE.Color(nightHor), night * 0.86);
+
+    top.lerp(NIGHT_TOP, night * 0.92);
+    hor.lerp(NIGHT_HORIZON, night * 0.86);
     // Warm the horizon at sunrise/sunset.
-    hor.lerp(new THREE.Color(0xff8a4a), dusk * 0.45 * (1 - night * 0.5));
+    hor.lerp(DUSK, dusk * 0.45 * (1 - night * 0.5));
     this.skyUniforms.uTop.value.copy(top);
     this.skyUniforms.uHorizon.value.copy(hor);
-    this.skyUniforms.uSunColor.value.copy(p.sun).lerp(new THREE.Color(0xff9a55), dusk * 0.6);
+    this.skyUniforms.uSunColor.value.copy(p.sun).lerp(SUNSET, dusk * 0.6);
 
     // --- fog ----------------------------------------------------------------
     // Matching the fog to the sky's horizon band is what makes the far edge of
@@ -242,30 +213,25 @@ export class Environment {
     this.fog.color.copy(this._fogTint);
 
     // --- lights -------------------------------------------------------------
-    const dayIntensity = p.sunIntensity * (1 - night);
+    const dayIntensity = p.sunIntensity * 0.65 * (1 - night);
     this.sun.intensity = dayIntensity + night * 0.78;
     this.sun.color.copy(p.sun)
-      .lerp(new THREE.Color(0xff9a55), dusk * 0.55)
-      .lerp(new THREE.Color(0x9db8ff), night * 0.95);
+      .lerp(SUNSET, dusk * 0.55)
+      .lerp(MOON, night * 0.95);
     // Keep the key light in front-left so the dino's face catches light.
     const lx = sunDir.x * 60, ly = Math.max(18, Math.abs(elev) * 70 + 14), lz = sunDir.z * 60 - 16;
     this.sun.position.set(lx, ly, lz);
 
-    this.hemi.intensity = lerp(p.ambientIntensity, 0.58, night);
-    this.hemi.color.copy(p.sky).lerp(new THREE.Color(0x8198c4), night * 0.9);
+    this.hemi.intensity = lerp(p.ambientIntensity + 0.18, 0.8, night);
+    this.hemi.color.copy(p.sky).lerp(NIGHT_FILL, night * 0.9);
     this.hemi.groundColor.copy(p.ground).multiplyScalar(lerp(1, 0.55, night));
-    this.ambient.intensity = lerp(0.2, 0.22, night);
-    this.rim.intensity = lerp(0.55, 0.62, night);
-    this.moonFill.intensity = night * 0.85;
 
     // --- sky dome + clouds follow the camera --------------------------------
     this.sky.position.copy(this.camera.position);
     this._clouds.position.copy(this.camera.position).setY(0);
-    this.cloudMat.color.copy(p.sky).lerp(new THREE.Color(0xffffff), 0.75).multiplyScalar(lerp(1, 0.28, night));
-    this.cloudMat.opacity = lerp(0.9, 0.55, night);
+    this.cloudMat.color.copy(p.sky).lerp(WHITE, 0.75).multiplyScalar(lerp(1, 0.28, night));
     if (!paused) {
       for (const c of this._clouds.children) {
-        c.rotation.y += dt * 0.02;
         c.position.x += dt * c.userData.speed * 0.4;
         if (c.position.x > 230) c.position.x = -230;
       }

@@ -231,9 +231,10 @@ async function main() {
     }, null, { timeout: 30000 });
     assert.equal(await page.getByRole('alert').isVisible(), false, 'The game failed to start');
     await page.waitForFunction(() => !document.getElementById('loading'));
-    await page.locator('[data-play]').click();
-    // Freeze real-time updates so each capture shows exactly the simulated action.
+    // Freeze before interacting too: software rendering must not starve the
+    // input event while the harness prepares its deterministic scenarios.
     await page.evaluate(() => window.__dino.engine.stop());
+    await page.locator('[data-play]').click();
 
     for (const sc of list) {
       let stats;

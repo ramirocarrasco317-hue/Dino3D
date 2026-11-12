@@ -15,7 +15,7 @@ export class Engine {
     try {
       this.renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: true,
+        antialias: false,
         powerPreference: 'high-performance',
         stencil: false,
       });
@@ -26,8 +26,8 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.06;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Contact shadows are tiny sprites: no extra shadow render passes.
+    this.renderer.shadowMap.enabled = false;
     this.renderer.setClearColor(0x8fd3ff, 1);
 
     this.scene = new THREE.Scene();
@@ -64,9 +64,13 @@ export class Engine {
   _onResize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, CFG.quality.maxPixelRatio);
-    this.renderer.setPixelRatio(dpr * (this.renderScale ?? 1));
-    this.renderer.setSize(w, h, false);
+    // Render a small image and upscale it with CSS nearest-neighbour sampling.
+    // Integer CSS-pixel steps keep the grid stable on high-DPI screens too.
+    // The DOM interface is independent and retains its full resolution.
+    const step = Math.max(2, Math.ceil(Math.max(w, h)
+      / (CFG.quality.maxRenderDimension * (this.renderScale ?? 1))));
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(Math.max(1, Math.floor(w / step)), Math.max(1, Math.floor(h / step)), false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }

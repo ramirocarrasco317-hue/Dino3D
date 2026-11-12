@@ -1,16 +1,13 @@
-import { CFG } from './Config.js';
-
 const TIERS = [
-  { scale: 1.0, shadows: true, shadowSize: 2048 },
-  { scale: 0.88, shadows: true, shadowSize: 1536 },
-  { scale: 0.78, shadows: true, shadowSize: 1024 },
-  { scale: 0.7, shadows: false, shadowSize: 1024 },
+  { scale: 1.0 },
+  { scale: 0.85 },
+  { scale: 0.67 },
+  { scale: 0.5 },
 ];
 
 /**
- * Keeps the frame rate honest on weaker GPUs: drops render scale, then shadow
- * resolution, then shadows entirely - and climbs back when there is headroom.
- * Changes are rate-limited so it never oscillates visibly.
+ * Adjusts the pixel grid on weaker GPUs. Real-time shadows stay disabled at
+ * every tier, so recovering quality never reintroduces expensive passes.
  */
 export class QualityController {
   constructor(engine, game) {
@@ -26,18 +23,6 @@ export class QualityController {
   _apply() {
     const t = TIERS[this.tier];
     this.engine.setRenderScale(t.scale);
-    const r = this.engine.renderer;
-    if (r.shadowMap.enabled !== t.shadows) {
-      r.shadowMap.enabled = t.shadows;
-      r.shadowMap.needsUpdate = true;
-      this.game.scene.traverse((o) => { if (o.isMesh && o.material) o.material.needsUpdate = true; });
-    }
-    const sun = this.game.env?.sun;
-    if (sun && sun.shadow.mapSize.width !== t.shadowSize) {
-      sun.shadow.mapSize.set(t.shadowSize, t.shadowSize);
-      sun.shadow.map?.dispose();
-      sun.shadow.map = null;
-    }
   }
 
   update(dt) {

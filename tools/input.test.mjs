@@ -352,7 +352,7 @@ test('missing WebGL shows an explanation and retry preserves the saved profile',
 
 test('an exception during setup replaces the loader with a recoverable error', async (t) => {
   const fresh = await startupPage(t, () => {
-    CanvasRenderingContext2D.prototype.createImageData = () => { throw new Error('Simulated setup failure'); };
+    CanvasRenderingContext2D.prototype.fillRect = () => { throw new Error('Simulated setup failure'); };
   });
   await fresh.goto(page.url());
   await expectStartupError(fresh, /No pudimos iniciar/);
@@ -461,4 +461,40 @@ test('graphics resources stay bounded across 18 km and forty restarts', async ()
     }
   });
   for (const sample of samples) assert.ok(sample.geometries <= sample.retained + 8, JSON.stringify(sample));
+});
+
+
+test('pixel rendering stays bounded on retina, portrait and ultrawide displays', async (t) => {
+  const fresh = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, reducedMotion: 'reduce' });
+  t.after(() => fresh.close());
+  fresh.on('pageerror', err => errors.push(err.message));
+  await fresh.goto(server.url);
+  await fresh.waitForFunction(() => !!window.__dino && !document.getElementById('loading'));
+  await fresh.evaluate(() => window.__dino.engine.stop());
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 844, height: 390 }, { width: 2560, height: 720 }]) {
+    await fresh.setViewportSize(viewport);
+    const result = await fresh.evaluate(() => {
+      const { engine, quality } = window.__dino;
+      quality.tier = 3; quality._apply();
+      quality.tier = 0; quality._apply();
+      const canvas = engine.canvas;
+      let dinoTriangles = 0;
+      window.__dino.game.player.model.root.traverse(node => {
+        if (node.isMesh) dinoTriangles += (node.geometry.index?.count ?? node.geometry.attributes.position.count) / 3;
+      });
+      return { width: canvas.width, height: canvas.height, aspect: engine.camera.aspect,
+        pixels: getComputedStyle(canvas).imageRendering, shadows: engine.renderer.shadowMap.enabled,
+        antialias: engine.renderer.getContext().getContextAttributes().antialias, dinoTriangles,
+        uiWidth: document.getElementById('ui').getBoundingClientRect().width };
+    });
+    assert.ok(result.width > 0 && result.height > 0);
+    assert.ok(Math.max(result.width, result.height) <= 640, JSON.stringify(result));
+    assert.ok(result.width <= viewport.width / 2 && result.height <= viewport.height / 2);
+    assert.equal(result.aspect, viewport.width / viewport.height);
+    assert.equal(result.uiWidth, viewport.width, 'the interface retains full resolution');
+    assert.equal(result.pixels, 'pixelated');
+    assert.equal(result.shadows, false, 'quality recovery must not enable shadow passes');
+    assert.equal(result.antialias, false);
+    assert.ok(result.dinoTriangles < 1000, 'the dinosaur must stay lightweight');
+  }
 });

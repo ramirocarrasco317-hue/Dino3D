@@ -1,22 +1,19 @@
 import * as THREE from 'three';
+import { pixelMaterial } from '../world/PixelMaterial.js';
 import { CFG } from '../core/Config.js';
 import { clamp, lerp } from '../core/MathUtils.js';
 
-const MAX_PARTICLES = 520;
+const MAX_PARTICLES = 192;
 
 function softDot() {
   const c = document.createElement('canvas');
-  c.width = c.height = 64;
+  c.width = c.height = 4;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.45, 'rgba(255,255,255,0.72)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 4, 4);
+  const texture = new THREE.CanvasTexture(c);
+  texture.magFilter = texture.minFilter = THREE.NearestFilter;
+  return texture;
 }
 
 const PARTICLE_VERT = /* glsl */`
@@ -89,8 +86,8 @@ export class Effects {
 
   _buildAuras() {
     // Shield bubble
-    const shieldGeo = new THREE.IcosahedronGeometry(1.35, 2);
-    this.shield = new THREE.Mesh(shieldGeo, new THREE.MeshStandardMaterial({
+    const shieldGeo = new THREE.IcosahedronGeometry(1.35, 0);
+    this.shield = new THREE.Mesh(shieldGeo, pixelMaterial({
       color: 0x53c8ff, emissive: 0x2aa5ff, emissiveIntensity: 0.85,
       transparent: true, opacity: 0.22, roughness: 0.1, metalness: 0.1,
       side: THREE.DoubleSide, depthWrite: false,
@@ -99,7 +96,7 @@ export class Effects {
     this.shield.renderOrder = 4;
     this.scene.add(this.shield);
 
-    const wireGeo = new THREE.IcosahedronGeometry(1.38, 1);
+    const wireGeo = new THREE.IcosahedronGeometry(1.38, 0);
     this.shieldWire = new THREE.LineSegments(
       new THREE.WireframeGeometry(wireGeo),
       new THREE.LineBasicMaterial({ color: 0x9ce8ff, transparent: true, opacity: 0.45 }),
@@ -109,7 +106,7 @@ export class Effects {
 
     // Magnet aura: a flat pulsing ring on the ground
     this.magnetRing = new THREE.Mesh(
-      new THREE.RingGeometry(CFG.coins.magnetRadius * 0.55, CFG.coins.magnetRadius * 0.6, 48),
+      new THREE.RingGeometry(CFG.coins.magnetRadius * 0.55, CFG.coins.magnetRadius * 0.6, 8),
       new THREE.MeshBasicMaterial({ color: 0xff6f8a, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }),
     );
     this.magnetRing.rotation.x = -Math.PI / 2;
@@ -118,7 +115,7 @@ export class Effects {
 
     // Score multiplier aura: warm rising glow at the feet
     this.multiRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.7, 1.05, 32),
+      new THREE.RingGeometry(0.7, 1.05, 8),
       new THREE.MeshBasicMaterial({ color: 0xc98bff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
     );
     this.multiRing.rotation.x = -Math.PI / 2;

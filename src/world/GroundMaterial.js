@@ -1,16 +1,14 @@
 import * as THREE from 'three';
 
 /**
- * Patches a MeshStandardMaterial so its albedo cross-fades between two biome
+ * Patches a MeshLambertMaterial so its colour cross-fades between two biome
  * colours along world Z. One shared material draws the whole track, and the
  * biome boundary sweeps smoothly toward the player instead of popping per
  * chunk.
  */
 export function makeBiomeMaterial(opts = {}) {
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshLambertMaterial({
     color: 0xffffff,
-    roughness: opts.roughness ?? 0.96,
-    metalness: 0,
     ...opts.extra,
   });
 

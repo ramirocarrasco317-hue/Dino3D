@@ -18,7 +18,9 @@ test('QA exits unsuccessfully for console errors, broken scenarios and empty fil
     let output = '';
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => { output += chunk; });
-    const timer = setTimeout(() => { output += '\nQA process timed out after 60000 ms'; child.kill(); }, 60000);
+    // Windows software WebGL can take longer to launch and release a context.
+    const timeout = process.platform === 'win32' ? 120000 : 60000;
+    const timer = setTimeout(() => { output += `\nQA process timed out after ${timeout} ms`; child.kill(); }, timeout);
     child.once('error', reject);
     child.once('close', (code) => { clearTimeout(timer); resolve({ code, output }); });
     t.after(() => child.kill());

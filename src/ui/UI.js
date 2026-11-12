@@ -1,3 +1,4 @@
+import dinoIcon from './dino-pixel.svg';
 import { bus } from '../core/Signals.js';
 import { profile } from '../game/Profile.js';
 import { achievementProgress } from '../game/Achievements.js';
@@ -81,8 +82,9 @@ export class UI {
     this.menu.innerHTML = `
       <div class="scrim"></div>
       <div class="panel">
-        <h1 class="title"><span class="dino">🦖</span><span>DINO<span class="accent">RUN</span> 3D</span></h1>
-        <p class="subtitle">El dinosaurio de la pantalla de "sin conexión", ahora en tres dimensiones.</p>
+        <p class="edition">PIXEL EDITION <span>◆</span> MUNDO 3D</p>
+        <h1 class="title"><img class="dino" src="${dinoIcon}" alt="" width="44" height="44"><span>DINO<span class="accent">RUN</span> 3D</span></h1>
+        <p class="subtitle">Tres carriles. Un dinosaurio. Píxeles sin fin.</p>
         <div class="stat-row">
           <div class="stat"><div class="label">Récord</div><div class="value num" data-best>0</div></div>
           <div class="stat"><div class="label">Distancia máx.</div><div class="value num" data-bestdist>0 m</div></div>

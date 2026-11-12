@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pixelMaterial } from '../world/PixelMaterial.js';
 import { bakeInPlace } from '../world/bake.js';
 
 /** Coins and power-up orbs. Geometry/material are shared across all instances. */
@@ -18,7 +19,7 @@ function makeStarGeometry(outer = 1, inner = 0.46, points = 5) {
   }
   shape.closePath();
   const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.35, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 1, curveSegments: 1,
+    depth: 0.22, bevelEnabled: false, curveSegments: 1,
   });
   geo.center();
   return geo;
@@ -26,15 +27,15 @@ function makeStarGeometry(outer = 1, inner = 0.46, points = 5) {
 
 function initCoinAssets() {
   if (coinGeo) return;
-  coinGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.085, 18);
+  coinGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.085, 8);
   coinGeo.rotateX(Math.PI / 2);
   // Same surface parameters on both parts so the baked coin is a single draw
   // call; only the vertex colour differs.
-  coinMat = new THREE.MeshStandardMaterial({
+  coinMat = pixelMaterial({
     color: 0xffc63d, roughness: 0.26, metalness: 0.8,
     emissive: 0xff9a1f, emissiveIntensity: 0.5,
   });
-  coinCoreMat = new THREE.MeshStandardMaterial({
+  coinCoreMat = pixelMaterial({
     color: 0xfff3bd, roughness: 0.26, metalness: 0.8,
     emissive: 0xff9a1f, emissiveIntensity: 0.5,
   });
@@ -79,10 +80,10 @@ function shieldIcon(color) {
   shape.bezierCurveTo(-0.24, -0.38, -0.42, -0.12, -0.42, 0.2);
   shape.bezierCurveTo(-0.42, 0.36, -0.34, 0.46, 0, 0.5);
   const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.16, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2, curveSegments: 6,
+    depth: 0.16, bevelEnabled: false, curveSegments: 1,
   });
   geo.center();
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+  const m = new THREE.Mesh(geo, pixelMaterial({
     color, roughness: 0.25, metalness: 0.55, emissive: color, emissiveIntensity: 0.45,
   }));
   m.castShadow = true;
@@ -92,14 +93,14 @@ function shieldIcon(color) {
 function magnetIcon(color) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(
-    new THREE.TorusGeometry(0.3, 0.12, 8, 16, Math.PI),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.6, emissive: color, emissiveIntensity: 0.35 }),
+    new THREE.TorusGeometry(0.3, 0.12, 4, 6, Math.PI),
+    pixelMaterial({ color, roughness: 0.3, metalness: 0.6, emissive: color, emissiveIntensity: 0.35 }),
   );
   body.castShadow = true;
   g.add(body);
-  const tipMat = new THREE.MeshStandardMaterial({ color: 0xf4f6fa, roughness: 0.25, metalness: 0.8 });
+  const tipMat = pixelMaterial({ color: 0xf4f6fa, roughness: 0.25, metalness: 0.8 });
   for (const sx of [-1, 1]) {
-    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.2, 10), tipMat);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), tipMat);
     tip.position.set(sx * 0.3, -0.1, 0);
     tip.castShadow = true;
     g.add(tip);
@@ -110,7 +111,7 @@ function magnetIcon(color) {
 function starIcon(color) {
   const geo = makeStarGeometry(0.42, 0.19, 5);
   geo.scale(1, 1, 0.55);
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+  const m = new THREE.Mesh(geo, pixelMaterial({
     color, roughness: 0.22, metalness: 0.6, emissive: color, emissiveIntensity: 0.5,
   }));
   m.castShadow = true;
@@ -119,8 +120,8 @@ function starIcon(color) {
 
 export function createPowerUp(type) {
   if (!ringGeo) {
-    ringGeo = new THREE.TorusGeometry(0.62, 0.045, 6, 28);
-    orbGeo = new THREE.SphereGeometry(0.56, 16, 12);
+    ringGeo = new THREE.TorusGeometry(0.62, 0.045, 3, 8);
+    orbGeo = new THREE.IcosahedronGeometry(0.56, 0);
   }
   const c = POWER_COLORS[type] ?? POWER_COLORS.shield;
   const g = new THREE.Group();
@@ -132,13 +133,13 @@ export function createPowerUp(type) {
   g.add(icon);
   g.userData.icon = icon;
 
-  const orb = new THREE.Mesh(orbGeo, new THREE.MeshStandardMaterial({
+  const orb = new THREE.Mesh(orbGeo, pixelMaterial({
     color: c.main, transparent: true, opacity: 0.24, roughness: 0.1, metalness: 0,
     emissive: c.main, emissiveIntensity: 0.9, depthWrite: false,
   }));
   g.add(orb);
 
-  const ringMat = new THREE.MeshStandardMaterial({
+  const ringMat = pixelMaterial({
     color: c.glow, emissive: c.main, emissiveIntensity: 1.4, roughness: 0.3, metalness: 0.2,
   });
   const ringA = new THREE.Mesh(ringGeo, ringMat);

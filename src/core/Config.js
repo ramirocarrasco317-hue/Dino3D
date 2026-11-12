@@ -96,8 +96,7 @@ export const CFG = {
   },
 
   quality: {
-    shadowMapSize: 2048,
-    maxPixelRatio: 2,
+    maxRenderDimension: 640,
   },
 };
 

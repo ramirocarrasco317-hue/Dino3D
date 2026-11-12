@@ -73,6 +73,7 @@ export function boot({ onReady, onError } = {}) {
         const r = engine.renderer.info.render;
         return {
           fps: Math.round(engine.fps), calls: r.calls, triangles: r.triangles,
+          renderWidth: engine.canvas.width, renderHeight: engine.canvas.height, qualityTier: quality.tier,
           state: game.state, speed: +game.speed.toFixed(2),
           distance: Math.round(game.chunks.distance),
           score: Math.round(game.run.score), coins: game.run.coins,
