@@ -156,6 +156,12 @@ test('Escape still closes achievements and game shortcuts work away from control
 });
 
 async function assertPanelFits() {
+  // Dynamic viewport units update on a rendering frame after setViewportSize.
+  // Pixel menus disable animations, so waiting for animations alone is insufficient.
+  await page.waitForFunction(() => {
+    const app = document.getElementById('app').getBoundingClientRect();
+    return Math.abs(app.width - innerWidth) < 1 && Math.abs(app.height - innerHeight) < 1;
+  });
   await page.locator('.screen.show').evaluate(async (screen) => {
     const animations = [...screen.getAnimations(), ...screen.querySelector('.panel').getAnimations()];
     await Promise.all(animations.map((animation) => animation.finished.catch(() => {})));
