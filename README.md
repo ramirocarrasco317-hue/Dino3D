@@ -6,7 +6,8 @@ Juego de carreras infinitas en 3D inspirado en el dinosaurio de Chrome, desarrol
 
 ## Jugar en el navegador
 
-[Abrir Dino3D](https://ramirocarrasco317-hue.github.io/Dino3D/).
+- [Versión original](https://ramirocarrasco317-hue.github.io/Dino3D/) — rama `main`.
+- [Versión pixel art](https://ramirocarrasco317-hue.github.io/Dino3D/pixel-art/) — rama `codex/pixel-art`.
 
 El enlace se habilita después del primer despliegue correcto en GitHub Pages.
 
@@ -86,9 +87,9 @@ npm run qa:production -- --only 16-pause
 
 ## Publicación automática
 
-En GitHub, seleccioná **Settings → Pages → Source → GitHub Actions** una vez. El flujo `Verify and publish` verifica cada cambio a `main` y cada pull request. Publica `dist/` únicamente cuando pasan todas las comprobaciones de `main`; los pull requests nunca publican.
+En GitHub, seleccioná **Settings → Pages → Source → GitHub Actions** una vez. El flujo `Verify and publish` compila y verifica por separado la versión original de `main` y la versión pixel art de `codex/pixel-art`. Publica ambas juntas únicamente cuando pasan todas las comprobaciones de una ejecución en `main`; los pull requests nunca publican. La versión original se sirve en `/Dino3D/` y la pixel art en `/Dino3D/pixel-art/`.
 
-Cada ejecución conserva las capturas y el reporte de QA como artefacto durante siete días. Podés volver a ejecutar el flujo desde **Actions → Verify and publish → Run workflow**.
+Cada ejecución conserva las capturas y el reporte de QA de cada versión como artefactos separados durante siete días. Después de actualizar la rama pixel art, publicá las dos versiones desde **Actions → Verify and publish → Run workflow**, seleccionando la rama **main**. Esto vuelve a comprobar ambas antes de reemplazar el sitio publicado.
 
 La verificación de GitHub usa Ubuntu 24.04 y el Chrome preinstalado en ese entorno; registra su versión antes de ejecutar las pruebas. Así no necesita descargar otro navegador durante cada ejecución.
 

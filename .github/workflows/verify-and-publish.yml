@@ -11,17 +11,26 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
   cancel-in-progress: false
 
 jobs:
   verify:
-    name: Build and test
+    name: Build and test (${{ matrix.version }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: original
+            ref: ${{ github.sha }}
+          - version: pixel-art
+            ref: codex/pixel-art
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ matrix.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -39,15 +48,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: qa-report
+          name: qa-report-${{ matrix.version }}
           path: shots/
           if-no-files-found: ignore
           retention-days: 7
       - name: Package the verified game
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
+          name: verified-${{ matrix.version }}
           path: dist/
+          if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: Publish to GitHub Pages
@@ -63,6 +75,24 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Download the original version
+        uses: actions/download-artifact@v5
+        with:
+          name: verified-original
+          path: _site/
+      - name: Download the pixel art version
+        uses: actions/download-artifact@v5
+        with:
+          name: verified-pixel-art
+          path: _site/pixel-art/
+      - name: Check both entry points
+        run: |
+          test -f _site/index.html
+          test -f _site/pixel-art/index.html
+      - name: Package both versions together
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
       - uses: actions/configure-pages@v5
       - name: Deploy the verified game
         id: deployment
