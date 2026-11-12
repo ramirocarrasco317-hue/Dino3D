@@ -691,6 +691,8 @@ input[type=range]::-moz-range-track, input[type=range]::-moz-range-thumb { borde
   .title { font-size: clamp(25px, 6.5vw, 34px); gap: 8px; }
   .title .dino { width: 32px; height: 32px; }
   .edition { font-size: 9px; letter-spacing: 0.08em; margin-bottom: 12px; }
+  /* Monospace scores need wider cards in portrait layouts. */
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(min(100%, 110px), 1fr)); }
   .stat .label { font-size: 9px; }
   .panel-actions button { font-size: 13px; padding: 12px; }
   .secondary-title { font-size: 26px; }
@@ -702,3 +704,4 @@ input[type=range]::-moz-range-track, input[type=range]::-moz-range-thumb { borde
 @media (prefers-reduced-motion: reduce) {
   .screen.show { animation: none; }
 }
+
